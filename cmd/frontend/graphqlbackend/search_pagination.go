@@ -150,7 +150,7 @@ func (r *searchResolver) paginatedResults(ctx context.Context) (result *SearchRe
 	if err != nil {
 		return nil, err
 	}
-	p := search.ToTextSearch(q, search.Pagination, query.PatternToFile)
+	p := search.ToTextSearch(q, search.Pagination, query.Identity)
 	args := search.TextParameters{
 		PatternInfo:     p,
 		RepoPromise:     (&search.Promise{}).Resolve(resolved.RepoRevs),
