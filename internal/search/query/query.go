@@ -53,11 +53,11 @@ func For(searchType SearchType) step {
 	var processType step
 	switch searchType {
 	case SearchTypeLiteral:
-		processType = succeeds(substituteConcat(space), labelLiteral)
+		processType = succeeds(substituteConcat(space))
 	case SearchTypeRegex:
-		processType = succeeds(escapeParensHeuristic, substituteConcat(fuzzyRegexp), labelRegexp)
+		processType = succeeds(escapeParensHeuristic, substituteConcat(fuzzyRegexp))
 	case SearchTypeStructural:
-		processType = succeeds(ellipsesForHoles, substituteConcat(space), labelStructural)
+		processType = succeeds(labelStructural, ellipsesForHoles, substituteConcat(space))
 	}
 	normalize := succeeds(LowercaseFieldNames, SubstituteAliases(searchType))
 	return sequence(normalize, processType)

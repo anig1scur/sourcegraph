@@ -465,6 +465,7 @@ func substituteOrForRegexp(nodes []Node) []Node {
 	return newNode
 }
 
+// Invariant: len(patterns) > 0.
 func fuzzyRegexp(patterns []Pattern) Pattern {
 	if len(patterns) == 1 {
 		return patterns[0]
@@ -483,6 +484,7 @@ func fuzzyRegexp(patterns []Pattern) Pattern {
 	}
 }
 
+// Invariant: len(patterns) > 0.
 func space(patterns []Pattern) Pattern {
 	if len(patterns) == 1 {
 		return patterns[0]
@@ -492,7 +494,8 @@ func space(patterns []Pattern) Pattern {
 		values = append(values, p.Value)
 	}
 	return Pattern{
-		Value: strings.Join(values, " "),
+		Annotation: patterns[0].Annotation, // Preserve labels of first pattern, important for quoted/literal/structural.
+		Value:      strings.Join(values, " "),
 	}
 }
 
