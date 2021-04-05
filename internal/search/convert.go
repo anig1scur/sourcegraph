@@ -9,6 +9,8 @@ import (
 	"github.com/go-enry/go-enry/v2"
 	"github.com/sourcegraph/sourcegraph/internal/search/filter"
 	"github.com/sourcegraph/sourcegraph/internal/search/query"
+
+	"github.com/inconshreveable/log15"
 )
 
 func unionRegexp(values []string) string {
@@ -98,10 +100,18 @@ func ToTextSearch(q query.Basic, p Protocol, transform query.BasicPass) *TextPat
 	var pattern string
 	if p, ok := q.Pattern.(query.Pattern); ok {
 		if q.IsLiteral() {
+			log15.Info("TREAT AS LITERAL, QUOTE THIS", "X", p.Value)
 			pattern = regexp.QuoteMeta(p.Value)
 		} else {
+			log15.Info("NOT LITERAL TREAT AS REGEXP", "X", p.Value)
 			pattern = p.Value
 		}
+	} else {
+		log15.Info("NOT PATTERN (MAYBE NIL)") // , "X", query.Q([]query.Node{q.Pattern}).String())
+	}
+
+	if q.Pattern == nil {
+		isRegexp = true // compatibility--meaningless.
 	}
 
 	negated := false
@@ -123,7 +133,7 @@ func ToTextSearch(q query.Basic, p Protocol, transform query.BasicPass) *TextPat
 		FilePatternsReposMustInclude: filesReposMustInclude,
 		FilePatternsReposMustExclude: filesReposMustExclude,
 		Languages:                    langInclude,
-		PathPatternsAreCaseSensitive: false, // Not used in Sourcegraph currently.
+		PathPatternsAreCaseSensitive: false, // Not used in Sourcegraph currently. Set true when case yes, but irrevelant.
 		CombyRule:                    q.FindValue(query.FieldCombyRule),
 		Index:                        q.Index(),
 		Select:                       selector,

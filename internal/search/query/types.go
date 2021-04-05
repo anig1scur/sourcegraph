@@ -157,6 +157,10 @@ func (b Basic) IsRegexp() bool {
 	if b.Pattern == nil {
 		return false
 	}
+	if _, ok := b.Pattern.(Pattern); !ok {
+		// not atomic
+		return false
+	}
 	annot := b.Pattern.(Pattern).Annotation
 	return annot.Labels.IsSet(Regexp)
 }
@@ -166,6 +170,10 @@ func (b Basic) IsLiteral() bool {
 	if b.Pattern == nil {
 		return false
 	}
+	if _, ok := b.Pattern.(Pattern); !ok {
+		// not atomic
+		return false
+	}
 	annot := b.Pattern.(Pattern).Annotation
 	return annot.Labels.IsSet(Literal)
 }
@@ -173,6 +181,10 @@ func (b Basic) IsLiteral() bool {
 // Warning: Atomic query assumption. Assumes query has one pattern with structural annotation.
 func (b Basic) IsStructural() bool {
 	if b.Pattern == nil {
+		return false
+	}
+	if _, ok := b.Pattern.(Pattern); !ok {
+		// not atomic
 		return false
 	}
 	annot := b.Pattern.(Pattern).Annotation

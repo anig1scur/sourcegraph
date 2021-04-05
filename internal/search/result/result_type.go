@@ -1,6 +1,8 @@
 package result
 
-import "strings"
+import (
+	"strings"
+)
 
 // Types represents a set of result types.
 // It's a bitset corresponding to the disjunction of types it represents.
@@ -42,11 +44,23 @@ func (r Types) Without(t Types) Types {
 
 func (r Types) String() string {
 	var names []string
-	for name, t := range TypeFromString {
-		if !r.Has(t) {
-			continue
-		}
-		names = append(names, name)
+	if r.Has(TypeFile) {
+		names = append(names, "file")
+	}
+	if r.Has(TypePath) {
+		names = append(names, "path")
+	}
+	if r.Has(TypeRepo) {
+		names = append(names, "repo")
+	}
+	if r.Has(TypeSymbol) {
+		names = append(names, "symbol")
+	}
+	if r.Has(TypeDiff) {
+		names = append(names, "diff")
+	}
+	if r.Has(TypeCommit) {
+		names = append(names, "commit")
 	}
 	return strings.Join(names, "|")
 }
