@@ -30,6 +30,44 @@ func labelsToString(nodes []Node) string {
 	return strings.Join(labels.String(), ",")
 }
 
+func TestParseParameterListTmp(t *testing.T) {
+	type value struct {
+		Result       string
+		ResultLabels string
+		ResultRange  string
+	}
+
+	test := func(input string) value {
+		result, err := Parse(input, SearchTypeRegex)
+		if err != nil {
+			t.Fatal(fmt.Sprintf("Unexpected error: %s", err))
+		}
+		resultNode := result[0]
+		got, _ := json.Marshal(resultNode)
+
+		var gotRange string
+		switch n := resultNode.(type) {
+		case Pattern:
+			gotRange = n.Annotation.Range.String()
+		case Parameter:
+			gotRange = n.Annotation.Range.String()
+		}
+
+		var gotLabels string
+		if _, ok := resultNode.(Pattern); ok {
+			gotLabels = labelsToString([]Node{resultNode})
+		}
+
+		return value{
+			Result:       string(got),
+			ResultLabels: gotLabels,
+			ResultRange:  gotRange,
+		}
+	}
+
+	autogold.Want("Normal field:value", value{Result: `{"Kind":1,"Operands":[{"field":"repo","value":"^github.com/sgtest/go-diff$","negated":false},{"value":"[][]","negated":false}],"Annotation":{"labels":0,"range":{"start":{"line":0,"column":0},"end":{"line":0,"column":0}}}}`}).Equal(t, test(`repo:^github.com/sgtest/go-diff$ [][]`))
+}
+
 func TestParseParameterList(t *testing.T) {
 	type value struct {
 		Result       string

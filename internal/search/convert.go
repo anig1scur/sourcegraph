@@ -1,7 +1,6 @@
 package search
 
 import (
-	"encoding/json"
 	"math"
 	"regexp"
 	"strconv"
@@ -10,8 +9,6 @@ import (
 	"github.com/go-enry/go-enry/v2"
 	"github.com/sourcegraph/sourcegraph/internal/search/filter"
 	"github.com/sourcegraph/sourcegraph/internal/search/query"
-
-	"github.com/inconshreveable/log15"
 )
 
 func unionRegexp(values []string) string {
@@ -90,9 +87,6 @@ func ToTextSearch(q query.Basic, p Protocol, transform query.BasicPass) *TextPat
 	filesExclude = append(filesExclude, appendMap(langExclude, langToFileRegexp)...)
 	filesReposMustInclude, filesReposMustExclude := q.IncludeExcludeValues(query.FieldRepoHasFile)
 	selector, _ := filter.SelectPathFromString(q.FindValue(query.FieldSelect)) // Invariant: already validated.
-
-	vv, _ := json.Marshal(filesInclude)
-	log15.Info("x", "1", string(vv))
 
 	count := count(q, p)
 

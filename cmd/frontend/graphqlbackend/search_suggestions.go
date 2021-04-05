@@ -357,7 +357,9 @@ func (r *searchResolver) Suggestions(ctx context.Context, args *searchSuggestion
 		if err != nil {
 			return nil, err
 		}
+		log15.Info("-=-=-=-=IGNORE START-=-=-=-=-")
 		p := search.ToTextSearch(q, search.Streaming, query.Identity)
+		log15.Info("-=-=-=-=IGNORE END-=-=-=-=-=-")
 
 		ctx, cancel := context.WithTimeout(ctx, 1*time.Second)
 		defer cancel()

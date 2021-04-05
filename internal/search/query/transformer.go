@@ -691,6 +691,34 @@ func labelStructural(nodes []Node) []Node {
 	})
 }
 
+func labelLiteral(nodes []Node) []Node {
+	return MapPattern(nodes, func(value string, negated bool, annotation Annotation) Node {
+		annotation.Labels.unset(Literal)
+		annotation.Labels.unset(Regexp)
+		annotation.Labels.unset(Structural)
+		annotation.Labels.set(Literal)
+		return Pattern{
+			Value:      value,
+			Negated:    negated,
+			Annotation: annotation,
+		}
+	})
+}
+
+func labelRegexp(nodes []Node) []Node {
+	return MapPattern(nodes, func(value string, negated bool, annotation Annotation) Node {
+		annotation.Labels.unset(Literal)
+		annotation.Labels.unset(Regexp)
+		annotation.Labels.unset(Structural)
+		annotation.Labels.set(Regexp)
+		return Pattern{
+			Value:      value,
+			Negated:    negated,
+			Annotation: annotation,
+		}
+	})
+}
+
 // ellipsesForHoles substitutes ellipses ... for :[_] holes in structural search queries.
 func ellipsesForHoles(nodes []Node) []Node {
 	return MapPattern(nodes, func(value string, negated bool, annotation Annotation) Node {

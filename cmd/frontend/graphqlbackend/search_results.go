@@ -1603,10 +1603,11 @@ func (r *searchResolver) doResults(ctx context.Context, forceResultTypes result.
 	if r.stream == nil {
 		mode = search.Batch
 	}
-	log15.Info("0", "care", "here")
+	log15.Info("+++++++++CONVERT START++++++++")
 	p := search.ToTextSearch(q, mode, query.Identity)
 	vv, _ := json.Marshal(p)
 	log15.Info("1", "p", string(vv))
+	log15.Info("+++++++++CONVERT END++++++++++")
 
 	if r.PatternType == query.SearchTypeStructural && p.Pattern == "" {
 		r.PatternType = query.SearchTypeLiteral
