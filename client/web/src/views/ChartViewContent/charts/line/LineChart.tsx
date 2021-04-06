@@ -1,12 +1,13 @@
-import React, { ReactElement, useCallback, useMemo, useState, MouseEvent } from 'react'
+import React, { ReactElement, useCallback, useMemo, useState, MouseEvent, useRef } from 'react'
 import classnames from 'classnames'
 import { LineChartContent } from 'sourcegraph'
 import { useDebouncedCallback } from 'use-debounce'
 import { curveLinear } from '@visx/curve'
 import { ParentSize } from '@visx/responsive'
 import { RenderTooltipParams } from '@visx/xychart/lib/components/Tooltip'
-import { Axis, GlyphSeries, LineSeries, Tooltip, XYChart } from '@visx/xychart'
+import { Axis, GlyphSeries, LineSeries, Tooltip, XYChart, EventEmitterProvider } from '@visx/xychart'
 
+import { XYCHART_EVENT_SOURCE } from '@visx/xychart/lib/constants';
 import { format } from 'd3-format'
 import { timeFormat } from 'd3-time-format'
 import { GridColumns, GridRows } from '@visx/grid'
@@ -22,6 +23,8 @@ import { onDatumClick } from '../types'
 import { DEFAULT_LINE_STROKE } from './colors'
 import { useScales } from './helpers/use-scales'
 import { GridScale } from '@visx/grid/lib/types'
+import { usePointerEventEmitters } from './helpers/use-event-emitters';
+import { noop } from 'rxjs';
 
 // Chart configuration
 const WIDTH_PER_TICK = 70
@@ -144,8 +147,41 @@ function LineChartContentComponent<Datum extends object>(props: LineChartProps<D
     )
 
     const activeDatumLink = activeDatum?.line?.linkURLs?.[activeDatum?.index]
-
     const rootClasses = classnames('line-chart__content', { 'line-chart__content--with-cursor': !!activeDatumLink })
+
+    const {
+        onPointerMove = noop,
+        onPointerOut = noop,
+        ...otherHandlers
+    } = usePointerEventEmitters({ source: XYCHART_EVENT_SOURCE })
+
+    const focused = useRef(false);
+
+    const handleRootPointerMove = useCallback((event: React.PointerEvent) => {
+        focused.current = true;
+        onPointerMove(event)
+
+    }, [onPointerMove])
+
+    const handleRootPointerOut = useCallback(
+        (event: React.PointerEvent) => {
+            event.persist();
+            focused.current = false
+
+            requestAnimationFrame(() => {
+                if (!focused.current) {
+                    onPointerOut(event)
+                }
+            })
+        },
+        [focused, onPointerOut]
+    );
+
+    const eventEmitters = {
+        onPointerMove: handleRootPointerMove,
+        onPointerOut: handleRootPointerOut,
+        ...otherHandlers
+    };
 
     return (
         <div className={rootClasses}>
@@ -154,7 +190,7 @@ function LineChartContentComponent<Datum extends object>(props: LineChartProps<D
                 yScale={scalesConfig.y}
                 height={height}
                 width={width}
-                captureEvents={true}
+                captureEvents={false}
                 margin={MARGIN}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUpSync}
@@ -200,34 +236,54 @@ function LineChartContentComponent<Datum extends object>(props: LineChartProps<D
                             dataKey={line.dataKey as string}
                             data={sortedData}
                             strokeWidth={3}
+                            enableEvents={true}
                             xAccessor={accessors.x}
                             yAccessor={accessors.y[line.dataKey as string]}
                             stroke={line.stroke ?? DEFAULT_LINE_STROKE}
                             curve={curveLinear}
                         />
-
-                        <GlyphSeries
-                            dataKey={line.dataKey as string}
-                            data={sortedData}
-                            /* eslint-disable-next-line react/jsx-no-bind */
-                            colorAccessor={() => line.stroke ?? DEFAULT_LINE_STROKE}
-                            xAccessor={accessors.x}
-                            yAccessor={accessors.y[line.dataKey as string]}
-                            renderGlyph={GlyphDotComponent}
-                        />
                     </Group>
                 ))}
 
-                <Group top={MARGIN.top} left={MARGIN.left}>
-                    {activeDatum && (
-                        <GlyphDot
-                            className="line-chart__glyph line-chart__glyph--active"
-                            r={8}
-                            fill={activeDatum.line.stroke ?? DEFAULT_LINE_STROKE}
-                            cx={xScale(accessors.x(activeDatum.datum))}
-                            cy={yScale(accessors.y[activeDatum.key](activeDatum.datum))}
-                        />
-                    )}
+                <Group
+                    pointerEvents='bounding-box'
+                    {...eventEmitters}>
+
+                    <rect
+                        x={MARGIN.left}
+                        y={MARGIN.top}
+                        width={innerWidth}
+                        height={innerHeight}
+                        fill="transparent"
+                    />
+
+                    {series.map(line => (
+                        <Group key={line.dataKey as string}>
+
+                            <GlyphSeries
+                                dataKey={line.dataKey as string}
+                                data={sortedData}
+                                /* eslint-disable-next-line react/jsx-no-bind */
+                                colorAccessor={() => line.stroke ?? DEFAULT_LINE_STROKE}
+                                enableEvents={false}
+                                xAccessor={accessors.x}
+                                yAccessor={accessors.y[line.dataKey as string]}
+                                renderGlyph={GlyphDotComponent}
+                            />
+                        </Group>
+                    ))}
+
+                    <Group top={MARGIN.top} left={MARGIN.left}>
+                        {activeDatum && (
+                            <GlyphDot
+                                className="line-chart__glyph line-chart__glyph--active"
+                                r={8}
+                                fill={activeDatum.line.stroke ?? DEFAULT_LINE_STROKE}
+                                cx={xScale(accessors.x(activeDatum.datum))}
+                                cy={yScale(accessors.y[activeDatum.key](activeDatum.datum))}
+                            />
+                        )}
+                    </Group>
                 </Group>
 
                 <Tooltip
@@ -250,32 +306,38 @@ export function LineChart<Datum extends object>(props: LineChartProps<Datum>): R
     const hasLegend = props.series.every(line => !!line.name)
 
     if (!hasLegend) {
-        return <LineChartContentComponent {...props} />
+        return (
+            <EventEmitterProvider>
+                <LineChartContentComponent {...props} />
+            </EventEmitterProvider>
+        )
     }
 
     return (
-        /* eslint-disable-next-line react/forbid-dom-props */
-        <div style={{ width, height }} className="line-chart">
-            {/*
+        <EventEmitterProvider>
+            {/* eslint-disable-next-line react/forbid-dom-props */}
+            <div style={{ width, height }} className="line-chart">
+                {/*
                 In case if we have a legend to render we have to have responsive container for chart
                 just to calculate right sizes for chart content = rootContainerSizes - legendSizes
             */}
-            <ParentSize className="line-chart__content-parent-size">
-                {({ width, height }) => <LineChartContentComponent {...otherProps} width={width} height={height} />}
-            </ParentSize>
+                <ParentSize className="line-chart__content-parent-size">
+                    {({ width, height }) => <LineChartContentComponent {...otherProps} width={width} height={height} />}
+                </ParentSize>
 
-            <ul className="line-chart__legend">
-                {props.series.map(line => (
-                    <li key={line.dataKey.toString()} className="line-chart__legend-item">
-                        <div
-                            /* eslint-disable-next-line react/forbid-dom-props */
-                            style={{ backgroundColor: line.stroke ?? DEFAULT_LINE_STROKE }}
-                            className="line-chart__legend-mark"
-                        />
-                        {line.name}
-                    </li>
-                ))}
-            </ul>
-        </div>
+                <ul className="line-chart__legend">
+                    {props.series.map(line => (
+                        <li key={line.dataKey.toString()} className="line-chart__legend-item">
+                            <div
+                                /* eslint-disable-next-line react/forbid-dom-props */
+                                style={{ backgroundColor: line.stroke ?? DEFAULT_LINE_STROKE }}
+                                className="line-chart__legend-mark"
+                            />
+                            {line.name}
+                        </li>
+                    ))}
+                </ul>
+            </div>
+        </EventEmitterProvider>
     )
 }
