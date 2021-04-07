@@ -428,8 +428,6 @@ func (s *changesetSyncer) SyncChangeset(ctx context.Context, id int64) error {
 	// future.
 	source, err = srcer.WithSiteAuthenticator(ctx, source, repo)
 	if err != nil {
-		// TODO: If this fails because no credential exists, the changeset syncer will be clogged
-		// and retry constantly, I guess.
 		return err
 	}
 
