@@ -387,10 +387,12 @@ func authenticateChangesetSource(src *BatchesSource, au auth.Authenticator) (*Ba
 	if err != nil {
 		return nil, err
 	}
-	src.au = au
-	src.ChangesetSource = repoSource.(repos.ChangesetSource)
-	src.UserSource = repoSource.(repos.UserSource)
-	return src, nil
+	clone, err := batchesSourceFromRepoSource(repoSource, src.store)
+	if err != nil {
+		return nil, err
+	}
+	clone.au = au
+	return clone, nil
 }
 
 func loadUserCredential(ctx context.Context, s *store.Store, userID int32, repo *types.Repo) (auth.Authenticator, error) {
