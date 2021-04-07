@@ -140,6 +140,11 @@ func (s *BatchesSource) GitserverPushConfig(repo *types.Repo) (*protocol.PushCon
 	if err != nil {
 		return nil, err
 	}
+	u, err := vcs.ParseURL(cloneURL)
+	if err != nil {
+		return nil, errors.Wrap(err, "parsing repository clone URL")
+	}
+
 	if s.au == nil {
 		// This is OK: we'll just send no key and gitserver will use
 		// the keys installed locally for SSH and the token from the
@@ -148,12 +153,7 @@ func (s *BatchesSource) GitserverPushConfig(repo *types.Repo) (*protocol.PushCon
 		// nil, which is only the case for site-admins currently.
 		// We want to revisit this once we start disabling usage of global
 		// credentials altogether in RFC312.
-		return &protocol.PushConfig{RemoteURL: cloneURL}, nil
-	}
-
-	u, err := vcs.ParseURL(cloneURL)
-	if err != nil {
-		return nil, errors.Wrap(err, "parsing repository clone URL")
+		return &protocol.PushConfig{RemoteURL: u.String()}, nil
 	}
 
 	// If the repo is cloned using SSH, we need to pass along a private key and passphrase.
@@ -195,6 +195,8 @@ func (s *BatchesSource) GitserverPushConfig(repo *types.Repo) (*protocol.PushCon
 	return &protocol.PushConfig{RemoteURL: u.String()}, nil
 }
 
+// DraftChangesetSource returns a repos.DraftChangesetSource, if the underlying
+// source supports it. Returns an error if not.
 func (s *BatchesSource) DraftChangesetSource() (repos.DraftChangesetSource, error) {
 	draftCss, ok := s.ChangesetSource.(repos.DraftChangesetSource)
 	if !ok {
@@ -350,6 +352,8 @@ func authenticateSource(src *BatchesSource, au auth.Authenticator) (*BatchesSour
 	return clone, nil
 }
 
+// loadUserCredential attempts to find a user credential for the given repo.
+// When no credential is found, nil is returned.
 func loadUserCredential(ctx context.Context, s *store.Store, userID int32, repo *types.Repo) (auth.Authenticator, error) {
 	cred, err := s.UserCredentials().GetByScope(ctx, database.UserCredentialScope{
 		Domain:              database.UserCredentialDomainBatches,
@@ -366,6 +370,8 @@ func loadUserCredential(ctx context.Context, s *store.Store, userID int32, repo 
 	return nil, nil
 }
 
+// v attempts to find a site credential for the given repo.
+// When no credential is found, nil is returned.
 func loadSiteCredential(ctx context.Context, s *store.Store, repo *types.Repo) (auth.Authenticator, error) {
 	cred, err := s.GetSiteCredential(ctx, store.GetSiteCredentialOpts{
 		ExternalServiceType: repo.ExternalRepo.ServiceType,
@@ -405,33 +411,25 @@ func setBasicAuth(u *url.URL, extSvcType, username, password string) error {
 	return nil
 }
 
-// extractCloneURL returns a remote URL from the repo, preferring SSH over HTTPS.
+// extractCloneURL returns a remote URL from the repo, preferring HTTPS over SSH.
 func extractCloneURL(repo *types.Repo) (string, error) {
 	if len(repo.Sources) == 0 {
 		return "", errors.New("no clone URL found for repo")
 	}
-	sources := make([]*types.SourceInfo, 0, len(repo.Sources))
+	cloneURLs := make([]*url.URL, 0, len(repo.Sources))
 	for _, source := range repo.Sources {
-		sources = append(sources, source)
-	}
-	sort.SliceStable(sources, func(i, j int) bool {
-		parsedURL, err := vcs.ParseURL(sources[i].CloneURL)
+		parsedURL, err := vcs.ParseURL(source.CloneURL)
 		if err != nil {
-			return false
+			return "", err
 		}
-		if parsedURL.Scheme == "ssh" || parsedURL.Scheme == "" {
-			return false
-		}
-		return true
+		cloneURLs = append(cloneURLs, parsedURL)
+	}
+	sort.SliceStable(cloneURLs, func(i, j int) bool {
+		return cloneURLs[i].Scheme != "ssh"
 	})
-	cloneURL := sources[0].CloneURL
+	cloneURL := cloneURLs[0]
 	// TODO: Do this once we don't want to use existing credentials anymore.
-	// parsedU, err := vcs.ParseURL(cloneURL)
-	// if err != nil {
-	// 	return "", err
-	// }
 	// // Remove any existing credentials from the clone URL.
 	// parsedU.User = nil
-	// return parsedU.String(), nil
-	return cloneURL, nil
+	return cloneURL.String(), nil
 }
