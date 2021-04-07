@@ -1182,9 +1182,9 @@ func TestExternalServiceValidate_ValidatesToken(t *testing.T) {
 		ctx    = context.Background()
 	)
 	src = testSource{
-		fn: func() (bool, error) {
+		fn: func() error {
 			called = true
-			return true, nil
+			return nil
 		},
 	}
 	err := externalServiceValidate(ctx, protocol.ExternalServiceSyncRequest{}, src)
@@ -1197,7 +1197,7 @@ func TestExternalServiceValidate_ValidatesToken(t *testing.T) {
 }
 
 type testSource struct {
-	fn func() (bool, error)
+	fn func() error
 }
 
 var _ repos.Source = &testSource{}
@@ -1214,7 +1214,7 @@ func (t testSource) WithAuthenticator(a auth.Authenticator) (repos.Source, error
 	return t, nil
 }
 
-func (t testSource) ValidateAuthenticator(ctx context.Context) (bool, error) {
+func (t testSource) ValidateAuthenticator(ctx context.Context) error {
 	return t.fn()
 }
 

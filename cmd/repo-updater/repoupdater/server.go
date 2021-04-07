@@ -402,10 +402,8 @@ func externalServiceValidate(ctx context.Context, req protocol.ExternalServiceSy
 	results := make(chan repos.SourceResult)
 
 	if v, ok := src.(repos.UserSource); ok {
-		if valid, err := v.ValidateAuthenticator(ctx); err != nil {
+		if err := v.ValidateAuthenticator(ctx); err != nil {
 			return err
-		} else if !valid {
-			return errors.New("failed to validate authentication")
 		}
 	} else {
 		go func() {
