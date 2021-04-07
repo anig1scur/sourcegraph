@@ -91,15 +91,14 @@ func testStoreCodeHost(t *testing.T, ctx context.Context, s *Store, clock ct.Clo
 			if err != nil {
 				t.Fatalf("unexpected error: %s", err)
 			}
-			if len(ids) == 0 {
-				t.Fatal("invalid amount of external service ids returned, want at least 1")
-			}
+			// We error when len(ids) == 0, so this is safe.
+			id := ids[0]
 
 			// We fetch the ExternalService and make sure that Type and URL match
-			extSvc, err := es.GetByID(ctx, ids[0])
+			extSvc, err := es.GetByID(ctx, id)
 			if err != nil {
 				if errcode.IsNotFound(err) {
-					t.Fatalf("external service %d not found", ids[0])
+					t.Fatalf("external service %d not found", id)
 				}
 
 				t.Fatalf("unexpected error: %s", err)

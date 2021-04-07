@@ -202,7 +202,7 @@ func buildChangesetSource(sourcer repos.Sourcer, externalService *types.External
 func authenticateChangesetSource(src repos.ChangesetSource, au auth.Authenticator) (repos.ChangesetSource, error) {
 	userSource, ok := src.(repos.UserSource)
 	if !ok {
-		return nil, fmt.Errorf("cannot create UserSource from external service of kind %q", "externalService.Kind")
+		return nil, errors.New("cannot create UserSource from ChangesetSource")
 	}
 	repoSource, err := userSource.WithAuthenticator(au)
 	if err != nil {
@@ -211,7 +211,7 @@ func authenticateChangesetSource(src repos.ChangesetSource, au auth.Authenticato
 	css, ok := repoSource.(repos.ChangesetSource)
 	// This should never happen.
 	if !ok {
-		return nil, fmt.Errorf("cannot create ChangesetSource from external service of kind %q", "externalService.Kind")
+		return nil, errors.New("cannot create ChangesetSource RepoSource")
 	}
 	return css, nil
 }
