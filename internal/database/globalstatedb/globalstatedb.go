@@ -73,7 +73,7 @@ func EnsureInitialized(ctx context.Context, dbh queryExecDatabaseHandler) (alrea
 	}
 
 	if !alreadyInitialized {
-		err = dbh.Exec(ctx, sqlf.Sprintf("UPDATE global_state SET initialized=true"))
+		err = dbh.Exec(ctx, sqlf.Sprintf("UPDATE global_state SET initialized=true WHERE initialized=false"))
 	}
 
 	return alreadyInitialized, err
