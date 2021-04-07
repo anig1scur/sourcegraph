@@ -80,7 +80,7 @@ func EnsureInitialized(ctx context.Context, dbh queryExecDatabaseHandler) (alrea
 
 func getConfiguration(ctx context.Context) (*State, error) {
 	configuration := &State{}
-	err := dbconn.Global.QueryRowContext(ctx, "SELECT site_id, initialized FROM global_state LIMIT 1").Scan(
+	err := dbconn.Global.QueryRowContext(ctx, "SELECT site_id, initialized FROM global_state WHERE initialized=true LIMIT 1").Scan(
 		&configuration.SiteID,
 		&configuration.Initialized,
 	)
