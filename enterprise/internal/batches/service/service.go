@@ -9,12 +9,12 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/backend"
 	"github.com/sourcegraph/sourcegraph/cmd/frontend/graphqlbackend"
+	"github.com/sourcegraph/sourcegraph/enterprise/internal/batches/sources"
 	"github.com/sourcegraph/sourcegraph/enterprise/internal/batches/store"
 	"github.com/sourcegraph/sourcegraph/internal/actor"
 	"github.com/sourcegraph/sourcegraph/internal/batches"
 	"github.com/sourcegraph/sourcegraph/internal/database"
 	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
-	"github.com/sourcegraph/sourcegraph/internal/errcode"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/auth"
 	"github.com/sourcegraph/sourcegraph/internal/httpcli"
 	"github.com/sourcegraph/sourcegraph/internal/repos"
@@ -509,42 +509,20 @@ var ErrNoNamespace = errors.New("no namespace given")
 // Since Bitbucket sends the username as a header in REST responses, we can
 // take it from there and complete the UserCredential.
 func (s *Service) FetchUsernameForBitbucketServerToken(ctx context.Context, externalServiceID, externalServiceType, token string) (string, error) {
-	extSvcID, err := s.store.GetExternalServiceID(ctx, store.GetExternalServiceIDOpts{
-		ExternalServiceID:   externalServiceID,
+	srcer := sources.NewSourcer(s.sourcer, s.store)
+	css, err := srcer.ForExternalService(ctx, store.GetExternalServiceIDOpts{
 		ExternalServiceType: externalServiceType,
+		ExternalServiceID:   externalServiceID,
 	})
 	if err != nil {
 		return "", err
 	}
-
-	externalService, err := s.store.ExternalServices().GetByID(ctx, extSvcID)
-	if err != nil {
-		if errcode.IsNotFound(err) {
-			return "", errors.New("no external service found for repo")
-		}
-
-		return "", err
-	}
-
-	sources, err := s.sourcer(externalService)
-	if err != nil {
-		return "", err
-	}
-	if len(sources) != 1 {
-		return "", errors.New("got no Source for external service")
-	}
-
-	userSource, ok := sources[0].(repos.UserSource)
-	if !ok {
-		return "", errors.New("external service source cannot use other authenticator")
-	}
-
-	source, err := userSource.WithAuthenticator(&auth.OAuthBearerToken{Token: token})
+	css, err = srcer.WithAuthenticator(css, &auth.OAuthBearerToken{Token: token})
 	if err != nil {
 		return "", err
 	}
 
-	usernameSource, ok := source.(usernameSource)
+	usernameSource, ok := css.(usernameSource)
 	if !ok {
 		return "", errors.New("external service source doesn't implement AuthenticatedUsername")
 	}
@@ -565,43 +543,22 @@ type usernameSource interface {
 var _ usernameSource = &repos.BitbucketServerSource{}
 
 func (s *Service) ValidateAuthenticator(ctx context.Context, externalServiceID, externalServiceType string, a auth.Authenticator) error {
-	extSvcID, err := s.store.GetExternalServiceID(ctx, store.GetExternalServiceIDOpts{
-		ExternalServiceID:   externalServiceID,
+	srcer := sources.NewSourcer(s.sourcer, s.store)
+	css, err := srcer.ForExternalService(ctx, store.GetExternalServiceIDOpts{
 		ExternalServiceType: externalServiceType,
+		ExternalServiceID:   externalServiceID,
 	})
 	if err != nil {
 		return err
 	}
-
-	externalService, err := s.store.ExternalServices().GetByID(ctx, extSvcID)
-	if err != nil {
-		if errcode.IsNotFound(err) {
-			return errors.New("no external service found for repo")
-		}
-		return err
-	}
-
-	sources, err := s.sourcer(externalService)
-	if err != nil {
-		return err
-	}
-	if len(sources) != 1 {
-		return errors.New("got no Source for external service")
-	}
-
-	userSource, ok := sources[0].(repos.UserSource)
-	if !ok {
-		return errors.New("external service Source cannot use other authenticator")
-	}
-
-	source, err := userSource.WithAuthenticator(a)
+	css, err = srcer.WithAuthenticator(css, a)
 	if err != nil {
 		return err
 	}
 
 	// Technically this should never happen, but better be safe.
-	if usrc, ok := source.(repos.UserSource); !ok {
-		return errors.New("external service Source cannot use other authenticator")
+	if usrc, ok := css.(repos.UserSource); !ok {
+		return errors.New("external service source cannot use other authenticator")
 	} else if err := usrc.ValidateAuthenticator(ctx); err != nil {
 		return err
 	}

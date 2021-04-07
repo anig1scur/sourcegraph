@@ -7,7 +7,6 @@ import (
 
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/batches"
-	"github.com/sourcegraph/sourcegraph/internal/database/basestore"
 )
 
 type ListCodeHostsOpts struct {
@@ -86,18 +85,27 @@ type GetExternalServiceIDOpts struct {
 	ExternalServiceID   string
 }
 
-func (s *Store) GetExternalServiceID(ctx context.Context, opts GetExternalServiceIDOpts) (int64, error) {
+func (s *Store) GetExternalServiceIDs(ctx context.Context, opts GetExternalServiceIDOpts) (ids []int64, err error) {
 	q := getExternalServiceIDQuery(opts)
 
-	// Returns the first external service to match.
-	id, ok, err := basestore.ScanFirstInt(s.Query(ctx, q))
+	err = s.query(ctx, q, func(sc scanner) error {
+		var id int64
+		sc.Scan(&id)
+		if err := sc.Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+		return nil
+	})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if !ok {
-		return 0, ErrNoResults
+
+	if len(ids) == 0 {
+		return ids, ErrNoResults
 	}
-	return int64(id), nil
+
+	return ids, nil
 }
 
 const getExternalServiceIDQueryFmtstr = `
@@ -109,7 +117,6 @@ JOIN external_service_repos esr ON esr.external_service_id = external_services.i
 JOIN repo ON esr.repo_id = repo.id
 WHERE %s
 ORDER BY external_services.id ASC
-LIMIT 1
 `
 
 func getExternalServiceIDQuery(opts GetExternalServiceIDOpts) *sqlf.Query {

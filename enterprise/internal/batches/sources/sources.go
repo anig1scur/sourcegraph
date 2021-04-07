@@ -39,7 +39,24 @@ func (s *Sourcer) ForChangeset(ctx context.Context, ch *batches.Changeset) (repo
 }
 
 func (s *Sourcer) ForRepo(ctx context.Context, repo *types.Repo) (repos.ChangesetSource, error) {
-	extSvc, err := loadExternalService(ctx, s.store.ExternalServices(), repo)
+	return s.loadExternalService(ctx, database.ExternalServicesListOptions{
+		// Consider all available external services for this repo.
+		IDs: repo.ExternalServiceIDs(),
+	})
+}
+
+func (s *Sourcer) ForExternalService(ctx context.Context, opts store.GetExternalServiceIDOpts) (repos.ChangesetSource, error) {
+	extSvcIDs, err := s.store.GetExternalServiceIDs(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return s.loadExternalService(ctx, database.ExternalServicesListOptions{
+		IDs: extSvcIDs,
+	})
+}
+
+func (s *Sourcer) loadExternalService(ctx context.Context, opts database.ExternalServicesListOptions) (repos.ChangesetSource, error) {
+	extSvc, err := loadExternalService(ctx, s.store.ExternalServices(), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -126,11 +143,8 @@ func (s *Sourcer) WithAuthenticator(css repos.ChangesetSource, au auth.Authentic
 // loadExternalService looks up all external services that are connected to the given repo.
 // The first external service to have a token configured will be returned then.
 // If no external service matching the above criteria is found, an error is returned.
-func loadExternalService(ctx context.Context, s *database.ExternalServiceStore, repo *types.Repo) (*types.ExternalService, error) {
-	es, err := s.List(ctx, database.ExternalServicesListOptions{
-		// Consider all available external services for this repo.
-		IDs: repo.ExternalServiceIDs(),
-	})
+func loadExternalService(ctx context.Context, s *database.ExternalServiceStore, opts database.ExternalServicesListOptions) (*types.ExternalService, error) {
+	es, err := s.List(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +177,7 @@ func loadExternalService(ctx context.Context, s *database.ExternalServiceStore, 
 		}
 	}
 
-	return nil, errors.Errorf("no external services found for repo %q", repo.Name)
+	return nil, errors.New("no external services found")
 }
 
 // buildChangesetSource get an authenticated ChangesetSource for the given repo

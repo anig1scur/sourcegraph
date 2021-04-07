@@ -82,21 +82,24 @@ func testStoreCodeHost(t *testing.T, ctx context.Context, s *Store, clock ct.Clo
 		})
 	})
 
-	t.Run("GetExternalServiceID", func(t *testing.T) {
+	t.Run("GetExternalServiceIDs", func(t *testing.T) {
 		for _, repo := range []*types.Repo{repo, otherRepo, gitlabRepo, bitbucketRepo, sshRepos[0], sshRepos[1]} {
-			id, err := s.GetExternalServiceID(ctx, GetExternalServiceIDOpts{
+			ids, err := s.GetExternalServiceIDs(ctx, GetExternalServiceIDOpts{
 				ExternalServiceType: repo.ExternalRepo.ServiceType,
 				ExternalServiceID:   repo.ExternalRepo.ServiceID,
 			})
 			if err != nil {
 				t.Fatalf("unexpected error: %s", err)
 			}
+			if len(ids) == 0 {
+				t.Fatal("invalid amount of external service ids returned, want at least 1")
+			}
 
 			// We fetch the ExternalService and make sure that Type and URL match
-			extSvc, err := es.GetByID(ctx, id)
+			extSvc, err := es.GetByID(ctx, ids[0])
 			if err != nil {
 				if errcode.IsNotFound(err) {
-					t.Fatalf("external service %d not found", id)
+					t.Fatalf("external service %d not found", ids[0])
 				}
 
 				t.Fatalf("unexpected error: %s", err)
