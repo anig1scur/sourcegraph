@@ -889,8 +889,6 @@ func (r *Resolver) CreateBatchChangesCredential(ctx context.Context, args *graph
 
 	svc := service.New(r.store)
 
-	// TODO: Do we want to validate the URL, or even if such an external service exists? Or better, would the DB have a constraint?
-
 	var a auth.Authenticator
 	keypair, err := encryption.GenerateRSAKey()
 	if err != nil {

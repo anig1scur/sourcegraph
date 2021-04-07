@@ -517,12 +517,12 @@ func (s *Service) FetchUsernameForBitbucketServerToken(ctx context.Context, exte
 	if err != nil {
 		return "", err
 	}
-	css, err = srcer.WithAuthenticator(css, &auth.OAuthBearerToken{Token: token})
+	css, err = css.WithAuthenticator(&auth.OAuthBearerToken{Token: token})
 	if err != nil {
 		return "", err
 	}
 
-	usernameSource, ok := css.(usernameSource)
+	usernameSource, ok := css.ChangesetSource.(usernameSource)
 	if !ok {
 		return "", errors.New("external service source doesn't implement AuthenticatedUsername")
 	}
@@ -551,15 +551,12 @@ func (s *Service) ValidateAuthenticator(ctx context.Context, externalServiceID, 
 	if err != nil {
 		return err
 	}
-	css, err = srcer.WithAuthenticator(css, a)
+	css, err = css.WithAuthenticator(a)
 	if err != nil {
 		return err
 	}
 
-	// Technically this should never happen, but better be safe.
-	if usrc, ok := css.(repos.UserSource); !ok {
-		return errors.New("external service source cannot use other authenticator")
-	} else if err := usrc.ValidateAuthenticator(ctx); err != nil {
+	if err := css.ValidateAuthenticator(ctx); err != nil {
 		return err
 	}
 	return nil

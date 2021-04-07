@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -17,19 +16,16 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/batches"
 	"github.com/sourcegraph/sourcegraph/internal/database"
-	"github.com/sourcegraph/sourcegraph/internal/extsvc"
-	"github.com/sourcegraph/sourcegraph/internal/extsvc/auth"
 	"github.com/sourcegraph/sourcegraph/internal/gitserver/protocol"
 	"github.com/sourcegraph/sourcegraph/internal/repos"
 	"github.com/sourcegraph/sourcegraph/internal/types"
-	"github.com/sourcegraph/sourcegraph/internal/vcs"
 )
 
-// ExecutePlan executes the given reconciler plan.
-func ExecutePlan(ctx context.Context, gitserverClient GitserverClient, sourcer repos.Sourcer, noSleepBeforeSync bool, tx *store.Store, plan *Plan) (err error) {
+// executePlan executes the given reconciler plan.
+func executePlan(ctx context.Context, gitserverClient GitserverClient, sourcer repos.Sourcer, noSleepBeforeSync bool, tx *store.Store, plan *Plan) (err error) {
 	e := &executor{
 		gitserverClient:   gitserverClient,
-		sourcer:           sourcer,
+		sourcer:           sources.NewSourcer(sourcer, tx),
 		noSleepBeforeSync: noSleepBeforeSync,
 		tx:                tx,
 		ch:                plan.Changeset,
@@ -42,14 +38,14 @@ func ExecutePlan(ctx context.Context, gitserverClient GitserverClient, sourcer r
 
 type executor struct {
 	gitserverClient   GitserverClient
-	sourcer           repos.Sourcer
+	sourcer           *sources.Sourcer
 	noSleepBeforeSync bool
 	tx                *store.Store
 	ch                *batches.Changeset
 	spec              *batches.ChangesetSpec
 	delta             *ChangesetSpecDelta
 
-	ccs  repos.ChangesetSource
+	ccs  *sources.BatchesSource
 	repo *types.Repo
 }
 
@@ -58,14 +54,15 @@ func (e *executor) Run(ctx context.Context, plan *Plan) (err error) {
 		return nil
 	}
 
+	// Load the changeset repo.
 	e.repo, err = e.tx.Repos().Get(ctx, e.ch.RepoID)
 	if err != nil {
 		return errors.Wrap(err, "failed to load repository")
 	}
 
-	sourcer := sources.NewSourcer(e.sourcer, e.tx)
-
-	e.ccs, err = sourcer.ForRepo(ctx, e.repo)
+	// This is a changeset source using the external service config for authentication,
+	// based on our heuristic in the sources package.
+	e.ccs, err = e.sourcer.ForRepo(ctx, e.repo)
 	if err != nil {
 		return err
 	}
@@ -77,12 +74,18 @@ func (e *executor) Run(ctx context.Context, plan *Plan) (err error) {
 		if err != nil {
 			return errors.Wrap(err, "failed to load owning batch change")
 		}
-		e.ccs, err = sourcer.WithAuthenticatorForUser(ctx, e.ccs, batchChange.LastApplierID, e.repo)
+		e.ccs, err = e.ccs.WithAuthenticatorForUser(ctx, batchChange.LastApplierID, e.repo)
 		if err != nil {
 			return err
 		}
 	} else {
-		e.ccs, err = sourcer.WithSiteAuthenticator(ctx, e.ccs, e.repo)
+		// This retains the external service token, when no site credential is found.
+		// Unowned changesets are imported, and therefore don't need to use a user
+		// credential, since reconciliation isn't a mutating process. We try to use
+		// a site-credential, but it's ok if it doesn't exist.
+		// TODO: This code-path will fail once the site credentials are the only
+		// fallback we want to use.
+		e.ccs, err = e.ccs.WithSiteAuthenticator(ctx, e.repo)
 		if err != nil {
 			return err
 		}
@@ -166,11 +169,11 @@ func (e *executor) pushChangesetPatch(ctx context.Context) (err error) {
 	// Figure out which authenticator we should use to modify the changeset.
 	// au is nil if we want to use the global credentials stored in the external
 	// service configuration.
-	au, err := loadAuthenticator(ctx, e.tx, e.ch, e.repo)
+	pushConf, err := e.ccs.GitserverPushConfig(e.repo)
 	if err != nil {
 		return err
 	}
-	opts, err := buildCommitOpts(e.repo, e.spec, au)
+	opts, err := buildCommitOpts(e.repo, e.spec, pushConf)
 	if err != nil {
 		return err
 	}
@@ -197,7 +200,7 @@ func (e *executor) publishChangeset(ctx context.Context, asDraft bool) (err erro
 	var exists bool
 	if asDraft {
 		// If the changeset shall be published in draft mode, make sure the changeset source implements DraftChangesetSource.
-		draftCcs, ok := e.ccs.(repos.DraftChangesetSource)
+		draftCcs, ok := e.ccs.ChangesetSource.(repos.DraftChangesetSource)
 		if !ok {
 			return errors.New("changeset operation is publish-draft, but changeset source doesn't implement DraftChangesetSource")
 		}
@@ -333,7 +336,7 @@ func (e *executor) closeChangeset(ctx context.Context) (err error) {
 
 // undraftChangeset marks the given changeset on its code host as ready for review.
 func (e *executor) undraftChangeset(ctx context.Context) (err error) {
-	draftCcs, ok := e.ccs.(repos.DraftChangesetSource)
+	draftCcs, ok := e.ccs.ChangesetSource.(repos.DraftChangesetSource)
 	if !ok {
 		return errors.New("changeset operation is undraft, but changeset source doesn't implement DraftChangesetSource")
 	}
@@ -391,29 +394,7 @@ func (e ErrPublishSameBranch) Error() string {
 
 func (e ErrPublishSameBranch) NonRetryable() bool { return true }
 
-// ErrMissingCredentials is returned by loadAuthenticator if the user that
-// applied the last batch  change/changeset spec doesn't have UserCredentials for
-// the given repository and is not a site-admin (so no fallback to the global
-// credentials is possible).
-type ErrMissingCredentials struct{ repo string }
-
-func (e ErrMissingCredentials) Error() string {
-	return fmt.Sprintf("user does not have a valid credential for repository %q", e.repo)
-}
-
-func (e ErrMissingCredentials) NonRetryable() bool { return true }
-
-// ErrNoPushCredentials is returned by buildCommitOpts if the credentials
-// cannot be used by git to authenticate a `git push`.
-type ErrNoPushCredentials struct{ credentialsType string }
-
-func (e ErrNoPushCredentials) Error() string {
-	return fmt.Sprintf("cannot use credentials of type %s to push commits", e.credentialsType)
-}
-
-func (e ErrNoPushCredentials) NonRetryable() bool { return true }
-
-func buildCommitOpts(repo *types.Repo, spec *batches.ChangesetSpec, a auth.Authenticator) (opts protocol.CreateCommitFromPatchRequest, err error) {
+func buildCommitOpts(repo *types.Repo, spec *batches.ChangesetSpec, pushOpts *protocol.PushConfig) (opts protocol.CreateCommitFromPatchRequest, err error) {
 	desc := spec.Spec
 
 	diff, err := desc.Diff()
@@ -432,16 +413,6 @@ func buildCommitOpts(repo *types.Repo, spec *batches.ChangesetSpec, a auth.Authe
 	}
 
 	commitAuthorEmail, err := desc.AuthorEmail()
-	if err != nil {
-		return opts, err
-	}
-
-	cloneURL, err := extractCloneURL(repo)
-	if err != nil {
-		return opts, err
-	}
-
-	pushConf, err := buildPushConfig(repo.ExternalRepo.ServiceType, cloneURL, a)
 	if err != nil {
 		return opts, err
 	}
@@ -470,130 +441,10 @@ func buildCommitOpts(repo *types.Repo, spec *batches.ChangesetSpec, a auth.Authe
 		// `a/` and `b/` filename prefixes. `-p0` tells `git apply` to not
 		// expect and strip prefixes.
 		GitApplyArgs: []string{"-p0"},
-		Push:         pushConf,
+		Push:         pushOpts,
 	}
 
 	return opts, nil
-}
-
-// extractCloneURL returns a remote URL, preferring SSH over HTTPS.
-func extractCloneURL(repo *types.Repo) (string, error) {
-	sources := make([]*types.SourceInfo, len(repo.Sources))
-	for _, source := range repo.Sources {
-		sources = append(sources, source)
-	}
-	sort.SliceStable(sources, func(i, j int) bool {
-		parsedURL, err := vcs.ParseURL(sources[i].CloneURL)
-		if err != nil {
-			return false
-		}
-		if parsedURL.Scheme == "ssh" || parsedURL.Scheme == "" {
-			return false
-		}
-		return true
-	})
-	if len(sources) == 0 {
-		return "", errors.New("no clone URL found for repo")
-	}
-	cloneURL := sources[0].CloneURL
-	parsedU, err := vcs.ParseURL(cloneURL)
-	if err != nil {
-		return "", err
-	}
-	// Remove any existing credentials from the clone URL.
-	parsedU.User = nil
-	return parsedU.String(), nil
-}
-
-// ErrNoSSHCredential is returned by buildPushConfig if the clone URL of the
-// repository uses the ssh:// scheme, but the authenticator doesn't support SSH pushes.
-type ErrNoSSHCredential struct{}
-
-func (e ErrNoSSHCredential) Error() string {
-	return "The used credential doesn't support SSH pushes, but the repo requires pushing over SSH."
-}
-
-func (e ErrNoSSHCredential) NonRetryable() bool { return true }
-
-func buildPushConfig(extSvcType, cloneURL string, a auth.Authenticator) (*protocol.PushConfig, error) {
-	if a == nil {
-		// This is OK: we'll just send no key and gitserver will use
-		// the keys installed locally for SSH and the token from the
-		// clone URL for https.
-		// This path is only triggered when `loadAuthenticator` returns
-		// nil, which is only the case for site-admins currently.
-		// We want to revisit this once we start disabling usage of global
-		// credentials altogether in RFC312.
-		return &protocol.PushConfig{RemoteURL: cloneURL}, nil
-	}
-
-	u, err := vcs.ParseURL(cloneURL)
-	if err != nil {
-		return nil, errors.Wrap(err, "parsing repository clone URL")
-	}
-
-	// If the repo is cloned using SSH, we need to pass along a private key and passphrase.
-	if u.Scheme == "ssh" {
-		sshA, ok := a.(auth.AuthenticatorWithSSH)
-		if !ok {
-			return nil, ErrNoSSHCredential{}
-		}
-		privateKey, passphrase := sshA.SSHPrivateKey()
-		return &protocol.PushConfig{
-			RemoteURL:  cloneURL,
-			PrivateKey: privateKey,
-			Passphrase: passphrase,
-		}, nil
-	}
-
-	switch av := a.(type) {
-	case *auth.OAuthBearerTokenWithSSH:
-		if err := setOAuthTokenAuth(u, extSvcType, av.Token); err != nil {
-			return nil, err
-		}
-	case *auth.OAuthBearerToken:
-		if err := setOAuthTokenAuth(u, extSvcType, av.Token); err != nil {
-			return nil, err
-		}
-
-	case *auth.BasicAuthWithSSH:
-		if err := setBasicAuth(u, extSvcType, av.Username, av.Password); err != nil {
-			return nil, err
-		}
-	case *auth.BasicAuth:
-		if err := setBasicAuth(u, extSvcType, av.Username, av.Password); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, ErrNoPushCredentials{credentialsType: fmt.Sprintf("%T", a)}
-	}
-
-	return &protocol.PushConfig{RemoteURL: u.String()}, nil
-}
-
-func setOAuthTokenAuth(u *url.URL, extsvcType, token string) error {
-	switch extsvcType {
-	case extsvc.TypeGitHub:
-		u.User = url.User(token)
-
-	case extsvc.TypeGitLab:
-		u.User = url.UserPassword("git", token)
-
-	case extsvc.TypeBitbucketServer:
-		return errors.New("require username/token to push commits to BitbucketServer")
-	}
-	return nil
-}
-
-func setBasicAuth(u *url.URL, extSvcType, username, password string) error {
-	switch extSvcType {
-	case extsvc.TypeGitHub, extsvc.TypeGitLab:
-		return errors.New("need token to push commits to " + extSvcType)
-
-	case extsvc.TypeBitbucketServer:
-		u.User = url.UserPassword(username, password)
-	}
-	return nil
 }
 
 type getBatchChanger interface {

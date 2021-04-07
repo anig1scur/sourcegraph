@@ -426,7 +426,7 @@ func (s *changesetSyncer) SyncChangeset(ctx context.Context, id int64) error {
 	// Try to use a site credential. If none is present, fall back to
 	// the external service config. This code path should error in the
 	// future.
-	source, err = srcer.WithSiteAuthenticator(ctx, source, repo)
+	source, err = source.WithSiteAuthenticator(ctx, repo)
 	if err != nil {
 		return err
 	}
@@ -436,7 +436,7 @@ func (s *changesetSyncer) SyncChangeset(ctx context.Context, id int64) error {
 
 // SyncChangeset refreshes the metadata of the given changeset and
 // updates them in the database.
-func SyncChangeset(ctx context.Context, syncStore SyncStore, source repos.ChangesetSource, repo *types.Repo, c *batches.Changeset) (err error) {
+func SyncChangeset(ctx context.Context, syncStore SyncStore, source *sources.BatchesSource, repo *types.Repo, c *batches.Changeset) (err error) {
 	repoChangeset := &repos.Changeset{Repo: repo, Changeset: c}
 	if err := source.LoadChangeset(ctx, repoChangeset); err != nil {
 		_, ok := err.(repos.ChangesetNotFoundError)

@@ -77,7 +77,7 @@ func (r *Reconciler) process(ctx context.Context, tx *store.Store, ch *batches.C
 
 	log15.Info("Reconciler processing changeset", "changeset", ch.ID, "operations", plan.Ops)
 
-	return ExecutePlan(
+	return executePlan(
 		ctx,
 		r.gitserverClient,
 		r.sourcer,
