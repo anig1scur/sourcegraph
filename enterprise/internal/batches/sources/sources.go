@@ -116,6 +116,14 @@ func (s *BatchesSource) GitserverPushConfig(repo *types.Repo) (*protocol.PushCon
 	return &protocol.PushConfig{RemoteURL: u.String()}, nil
 }
 
+func (s *BatchesSource) DraftChangesetSource() (repos.DraftChangesetSource, error) {
+	draftCss, ok := s.ChangesetSource.(repos.DraftChangesetSource)
+	if !ok {
+		return nil, errors.New("changeset source doesn't implement DraftChangesetSource")
+	}
+	return draftCss, nil
+}
+
 func setOAuthTokenAuth(u *url.URL, extsvcType, token string) error {
 	switch extsvcType {
 	case extsvc.TypeGitHub:

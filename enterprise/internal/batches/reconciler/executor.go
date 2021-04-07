@@ -200,11 +200,11 @@ func (e *executor) publishChangeset(ctx context.Context, asDraft bool) (err erro
 	var exists bool
 	if asDraft {
 		// If the changeset shall be published in draft mode, make sure the changeset source implements DraftChangesetSource.
-		draftCcs, ok := e.ccs.ChangesetSource.(repos.DraftChangesetSource)
-		if !ok {
-			return errors.New("changeset operation is publish-draft, but changeset source doesn't implement DraftChangesetSource")
+		draftCss, err := e.ccs.DraftChangesetSource()
+		if err != nil {
+			return err
 		}
-		exists, err = draftCcs.CreateDraftChangeset(ctx, cs)
+		exists, err = draftCss.CreateDraftChangeset(ctx, cs)
 	} else {
 		// If we're running this method a second time, because we failed due to an
 		// ephemeral error, there's a race condition here.
@@ -336,9 +336,9 @@ func (e *executor) closeChangeset(ctx context.Context) (err error) {
 
 // undraftChangeset marks the given changeset on its code host as ready for review.
 func (e *executor) undraftChangeset(ctx context.Context) (err error) {
-	draftCcs, ok := e.ccs.ChangesetSource.(repos.DraftChangesetSource)
-	if !ok {
-		return errors.New("changeset operation is undraft, but changeset source doesn't implement DraftChangesetSource")
+	draftCss, err := e.ccs.DraftChangesetSource()
+	if err != nil {
+		return err
 	}
 
 	cs := &repos.Changeset{
@@ -350,7 +350,7 @@ func (e *executor) undraftChangeset(ctx context.Context) (err error) {
 		Changeset: e.ch,
 	}
 
-	if err := draftCcs.UndraftChangeset(ctx, cs); err != nil {
+	if err := draftCss.UndraftChangeset(ctx, cs); err != nil {
 		return errors.Wrap(err, "undrafting changeset")
 	}
 	return nil
