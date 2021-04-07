@@ -61,13 +61,14 @@ type queryExecDatabaseHandler interface {
 // accidentally deleting all user accounts and opening up their site to any attacker becoming a site
 // admin and (2) a bug in user account creation code letting attackers create site admin accounts.
 func EnsureInitialized(ctx context.Context, dbh queryExecDatabaseHandler) (alreadyInitialized bool, err error) {
-	if err := tryInsertNew(ctx, dbh); err != nil {
+	_, err = getConfiguration(ctx)
+	if err == nil {
+		return true, nil
+	} else if err != sql.ErrNoRows {
 		return false, err
 	}
 
-	// The "SELECT ... FOR UPDATE" prevents a race condition where two calls, each in their own transaction,
-	// would see this initialized value as false and then set it to true below.
-	if err := dbh.QueryRow(ctx, sqlf.Sprintf(`SELECT initialized FROM global_state FOR UPDATE LIMIT 1`)).Scan(&alreadyInitialized); err != nil {
+	if err := tryInsertNew(ctx, dbh); err != nil {
 		return false, err
 	}
 
