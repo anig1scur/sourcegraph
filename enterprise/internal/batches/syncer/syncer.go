@@ -423,9 +423,8 @@ func (s *changesetSyncer) SyncChangeset(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	// Try to use a site credential. If none is present, fall back to
-	// the external service config. This code path should error in the
-	// future.
+	// Try to use a site credential. If none is present, this falls back to
+	// the external service config. This code path should error in the future.
 	source, err = source.WithSiteAuthenticator(ctx, repo)
 	if err != nil {
 		return err

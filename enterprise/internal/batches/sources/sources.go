@@ -22,10 +22,10 @@ import (
 	"github.com/sourcegraph/sourcegraph/schema"
 )
 
-// ErrMissingCredentials is returned by BatchesSource.WithAuthenticatorForUser, if
-// the user that applied the last batch change/changeset spec doesn't have UserCredentials
-// for the given repository and is not a site-admin (so no fallback to the global credentials
-// is possible).
+// ErrMissingCredentials is returned by BatchesSource.WithAuthenticatorForUser,
+// if the user that applied the last batch change/changeset spec doesn't have
+// UserCredentials for the given repository and is not a site-admin (so no
+// fallback to the global credentials is possible).
 type ErrMissingCredentials struct{ repo string }
 
 func (e ErrMissingCredentials) Error() string {
@@ -34,8 +34,8 @@ func (e ErrMissingCredentials) Error() string {
 
 func (e ErrMissingCredentials) NonRetryable() bool { return true }
 
-// ErrNoPushCredentials is returned by BatchesSource.GitserverPushConfig if the authenticator
-// cannot be used by git to authenticate a `git push`.
+// ErrNoPushCredentials is returned by BatchesSource.GitserverPushConfig if the
+// authenticator cannot be used by git to authenticate a `git push`.
 type ErrNoPushCredentials struct{ credentialsType string }
 
 func (e ErrNoPushCredentials) Error() string {
@@ -44,8 +44,9 @@ func (e ErrNoPushCredentials) Error() string {
 
 func (e ErrNoPushCredentials) NonRetryable() bool { return true }
 
-// ErrNoSSHCredential is returned by BatchesSource.GitserverPushConfig, if the clone URL of
-// the repository uses the ssh:// scheme, but the authenticator doesn't support SSH pushes.
+// ErrNoSSHCredential is returned by BatchesSource.GitserverPushConfig, if the
+// clone URL of the repository uses the ssh:// scheme, but the authenticator
+// doesn't support SSH pushes.
 type ErrNoSSHCredential struct{}
 
 func (e ErrNoSSHCredential) Error() string {
@@ -54,15 +55,16 @@ func (e ErrNoSSHCredential) Error() string {
 
 func (e ErrNoSSHCredential) NonRetryable() bool { return true }
 
-// Sourcer exposes methods to get a BatchesSource based on a changeset, repo or external service.
+// Sourcer exposes methods to get a BatchesSource based on a changeset, repo or
+// external service.
 type Sourcer struct {
 	sourcer repos.Sourcer
 	store   *store.Store
 }
 
-// BatchesSource wraps repos.ChangesetSource and repos.UserSource, which are both required to be a
-// valid source used with Batch Changes. It exposes methods to be authenticated with a user or site
-// credential.
+// BatchesSource wraps repos.ChangesetSource and repos.UserSource, which are both
+// required to be a valid source used with Batch Changes. It exposes methods to
+// be authenticated with a user or site credential.
 type BatchesSource struct {
 	repos.ChangesetSource
 	repos.UserSource
