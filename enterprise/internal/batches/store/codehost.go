@@ -80,13 +80,13 @@ func scanCodeHost(c *batches.CodeHost, sc scanner) error {
 	)
 }
 
-type GetExternalServiceIDOpts struct {
+type GetExternalServiceIDsOpts struct {
 	ExternalServiceType string
 	ExternalServiceID   string
 }
 
-func (s *Store) GetExternalServiceIDs(ctx context.Context, opts GetExternalServiceIDOpts) (ids []int64, err error) {
-	q := getExternalServiceIDQuery(opts)
+func (s *Store) GetExternalServiceIDs(ctx context.Context, opts GetExternalServiceIDsOpts) (ids []int64, err error) {
+	q := getExternalServiceIDsQuery(opts)
 
 	err = s.query(ctx, q, func(sc scanner) error {
 		var id int64
@@ -108,8 +108,8 @@ func (s *Store) GetExternalServiceIDs(ctx context.Context, opts GetExternalServi
 	return ids, nil
 }
 
-const getExternalServiceIDQueryFmtstr = `
--- source: enterprise/internal/batches/store/codehost.go:GetExternalServiceID
+const getExternalServiceIDsQueryFmtstr = `
+-- source: enterprise/internal/batches/store/codehost.go:GetExternalServiceIDs
 SELECT
 	external_services.id
 FROM external_services
@@ -119,12 +119,12 @@ WHERE %s
 ORDER BY external_services.id ASC
 `
 
-func getExternalServiceIDQuery(opts GetExternalServiceIDOpts) *sqlf.Query {
+func getExternalServiceIDsQuery(opts GetExternalServiceIDsOpts) *sqlf.Query {
 	preds := []*sqlf.Query{
 		sqlf.Sprintf("repo.external_service_type = %s", opts.ExternalServiceType),
 		sqlf.Sprintf("repo.external_service_id = %s", opts.ExternalServiceID),
 		sqlf.Sprintf("external_services.deleted_at IS NULL"),
 		sqlf.Sprintf("repo.deleted_at IS NULL"),
 	}
-	return sqlf.Sprintf(getExternalServiceIDQueryFmtstr, sqlf.Join(preds, "AND"))
+	return sqlf.Sprintf(getExternalServiceIDsQueryFmtstr, sqlf.Join(preds, "AND"))
 }

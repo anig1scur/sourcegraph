@@ -17,6 +17,7 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/api"
 	"github.com/sourcegraph/sourcegraph/internal/batches"
 	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/httpcli"
 	"github.com/sourcegraph/sourcegraph/internal/repos"
 	"github.com/sourcegraph/sourcegraph/internal/types"
@@ -47,6 +48,9 @@ type SyncStore interface {
 	Repos() *database.RepoStore
 	ExternalServices() *database.ExternalServiceStore
 	Clock() func() time.Time
+	DB() dbutil.DB
+	GetExternalServiceIDs(ctx context.Context, opts store.GetExternalServiceIDsOpts) ([]int64, error)
+	UserCredentials() *database.UserCredentialsStore
 }
 
 // NewSyncRegistry creates a new sync registry which starts a syncer for each code host and will update them
@@ -466,7 +470,7 @@ func SyncChangeset(ctx context.Context, syncStore SyncStore, source *sources.Bat
 }
 
 func loadChangesetSource(ctx context.Context, cf *httpcli.Factory, syncStore SyncStore, repo *types.Repo) (*sources.BatchesSource, error) {
-	srcer := sources.NewSourcer(repos.NewSourcer(cf), syncStore.(*store.Store))
+	srcer := sources.NewSourcer(repos.NewSourcer(cf), syncStore)
 	// This is a ChangesetSource authenticated with the external service
 	// token.
 	source, err := srcer.ForRepo(ctx, repo)

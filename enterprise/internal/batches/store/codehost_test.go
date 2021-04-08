@@ -84,7 +84,7 @@ func testStoreCodeHost(t *testing.T, ctx context.Context, s *Store, clock ct.Clo
 
 	t.Run("GetExternalServiceIDs", func(t *testing.T) {
 		for _, repo := range []*types.Repo{repo, otherRepo, gitlabRepo, bitbucketRepo, sshRepos[0], sshRepos[1]} {
-			ids, err := s.GetExternalServiceIDs(ctx, GetExternalServiceIDOpts{
+			ids, err := s.GetExternalServiceIDs(ctx, GetExternalServiceIDsOpts{
 				ExternalServiceType: repo.ExternalRepo.ServiceType,
 				ExternalServiceID:   repo.ExternalRepo.ServiceID,
 			})

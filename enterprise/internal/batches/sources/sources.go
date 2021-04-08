@@ -12,6 +12,7 @@ import (
 	"github.com/sourcegraph/sourcegraph/internal/actor"
 	"github.com/sourcegraph/sourcegraph/internal/batches"
 	"github.com/sourcegraph/sourcegraph/internal/database"
+	"github.com/sourcegraph/sourcegraph/internal/database/dbutil"
 	"github.com/sourcegraph/sourcegraph/internal/errcode"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc"
 	"github.com/sourcegraph/sourcegraph/internal/extsvc/auth"
@@ -55,11 +56,20 @@ func (e ErrNoSSHCredential) Error() string {
 
 func (e ErrNoSSHCredential) NonRetryable() bool { return true }
 
+type SourcerStore interface {
+	DB() dbutil.DB
+	GetSiteCredential(ctx context.Context, opts store.GetSiteCredentialOpts) (*store.SiteCredential, error)
+	GetExternalServiceIDs(ctx context.Context, opts store.GetExternalServiceIDsOpts) ([]int64, error)
+	Repos() *database.RepoStore
+	ExternalServices() *database.ExternalServiceStore
+	UserCredentials() *database.UserCredentialsStore
+}
+
 // Sourcer exposes methods to get a BatchesSource based on a changeset, repo or
 // external service.
 type Sourcer struct {
 	sourcer repos.Sourcer
-	store   *store.Store
+	store   SourcerStore
 }
 
 // BatchesSource wraps repos.ChangesetSource and repos.UserSource, which are both
@@ -70,11 +80,11 @@ type BatchesSource struct {
 	repos.UserSource
 
 	au    auth.Authenticator
-	store *store.Store
+	store SourcerStore
 }
 
 // NewSourcer returns a new Sourcer to be used in Batch Changes.
-func NewSourcer(sourcer repos.Sourcer, store *store.Store) *Sourcer {
+func NewSourcer(sourcer repos.Sourcer, store SourcerStore) *Sourcer {
 	return &Sourcer{
 		sourcer,
 		store,
@@ -100,7 +110,7 @@ func (s *Sourcer) ForRepo(ctx context.Context, repo *types.Repo) (*BatchesSource
 }
 
 // ForExternalService returns a BatchesSource based on the provided external service opts.
-func (s *Sourcer) ForExternalService(ctx context.Context, opts store.GetExternalServiceIDOpts) (*BatchesSource, error) {
+func (s *Sourcer) ForExternalService(ctx context.Context, opts store.GetExternalServiceIDsOpts) (*BatchesSource, error) {
 	extSvcIDs, err := s.store.GetExternalServiceIDs(ctx, opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "loading external service IDs")
@@ -240,7 +250,7 @@ func (s *BatchesSource) WithAuthenticatorForUser(ctx context.Context, userID int
 	// not, then we need to error out.
 	// Once we tackle https://github.com/sourcegraph/sourcegraph/issues/16814,
 	// this code path should be removed.
-	user, err := database.UsersWith(s.store).GetByID(ctx, userID)
+	user, err := database.Users(s.store.DB()).GetByID(ctx, userID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to load user")
 	}
@@ -312,7 +322,7 @@ func loadExternalService(ctx context.Context, s *database.ExternalServiceStore, 
 
 // buildChangesetSource get an authenticated ChangesetSource for the given repo
 // to load the changeset state from.
-func buildChangesetSource(sourcer repos.Sourcer, store *store.Store, externalService *types.ExternalService) (*BatchesSource, error) {
+func buildChangesetSource(sourcer repos.Sourcer, store SourcerStore, externalService *types.ExternalService) (*BatchesSource, error) {
 	// Then, use the external service to build a ChangesetSource.
 	sources, err := sourcer(externalService)
 	if err != nil {
@@ -325,7 +335,7 @@ func buildChangesetSource(sourcer repos.Sourcer, store *store.Store, externalSer
 	return batchesSourceFromRepoSource(source, store)
 }
 
-func batchesSourceFromRepoSource(src repos.Source, store *store.Store) (*BatchesSource, error) {
+func batchesSourceFromRepoSource(src repos.Source, store SourcerStore) (*BatchesSource, error) {
 	css, ok := src.(repos.ChangesetSource)
 	if !ok {
 		return nil, fmt.Errorf("cannot create ChangesetSource from external service")
@@ -356,7 +366,7 @@ func authenticateSource(src *BatchesSource, au auth.Authenticator) (*BatchesSour
 
 // loadUserCredential attempts to find a user credential for the given repo.
 // When no credential is found, nil is returned.
-func loadUserCredential(ctx context.Context, s *store.Store, userID int32, repo *types.Repo) (auth.Authenticator, error) {
+func loadUserCredential(ctx context.Context, s SourcerStore, userID int32, repo *types.Repo) (auth.Authenticator, error) {
 	cred, err := s.UserCredentials().GetByScope(ctx, database.UserCredentialScope{
 		Domain:              database.UserCredentialDomainBatches,
 		UserID:              userID,
@@ -374,7 +384,7 @@ func loadUserCredential(ctx context.Context, s *store.Store, userID int32, repo 
 
 // v attempts to find a site credential for the given repo.
 // When no credential is found, nil is returned.
-func loadSiteCredential(ctx context.Context, s *store.Store, repo *types.Repo) (auth.Authenticator, error) {
+func loadSiteCredential(ctx context.Context, s SourcerStore, repo *types.Repo) (auth.Authenticator, error) {
 	cred, err := s.GetSiteCredential(ctx, store.GetSiteCredentialOpts{
 		ExternalServiceType: repo.ExternalRepo.ServiceType,
 		ExternalServiceID:   repo.ExternalRepo.ServiceID,

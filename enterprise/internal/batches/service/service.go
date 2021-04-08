@@ -510,7 +510,7 @@ var ErrNoNamespace = errors.New("no namespace given")
 // take it from there and complete the UserCredential.
 func (s *Service) FetchUsernameForBitbucketServerToken(ctx context.Context, externalServiceID, externalServiceType, token string) (string, error) {
 	srcer := sources.NewSourcer(s.sourcer, s.store)
-	css, err := srcer.ForExternalService(ctx, store.GetExternalServiceIDOpts{
+	css, err := srcer.ForExternalService(ctx, store.GetExternalServiceIDsOpts{
 		ExternalServiceType: externalServiceType,
 		ExternalServiceID:   externalServiceID,
 	})
@@ -548,7 +548,7 @@ func (s *Service) ValidateAuthenticator(ctx context.Context, externalServiceID, 
 	}
 
 	srcer := sources.NewSourcer(s.sourcer, s.store)
-	css, err := srcer.ForExternalService(ctx, store.GetExternalServiceIDOpts{
+	css, err := srcer.ForExternalService(ctx, store.GetExternalServiceIDsOpts{
 		ExternalServiceType: externalServiceType,
 		ExternalServiceID:   externalServiceID,
 	})
