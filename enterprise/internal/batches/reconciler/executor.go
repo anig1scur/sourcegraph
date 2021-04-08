@@ -205,16 +205,20 @@ func (e *executor) publishChangeset(ctx context.Context, asDraft bool) (err erro
 			return err
 		}
 		exists, err = draftCss.CreateDraftChangeset(ctx, cs)
+		if err != nil {
+			return errors.Wrap(err, "creating draft changeset")
+		}
 	} else {
 		// If we're running this method a second time, because we failed due to an
 		// ephemeral error, there's a race condition here.
 		// It's possible that `CreateChangeset` doesn't return the newest head ref
 		// commit yet, because the API of the codehost doesn't return it yet.
 		exists, err = e.ccs.CreateChangeset(ctx, cs)
+		if err != nil {
+			return errors.Wrap(err, "creating changeset")
+		}
 	}
-	if err != nil {
-		return errors.Wrap(err, "creating changeset")
-	}
+
 	// If the Changeset already exists and our source can update it, we try to update it
 	if exists {
 		outdated, err := cs.IsOutdated()
