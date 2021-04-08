@@ -542,6 +542,8 @@ type usernameSource interface {
 
 var _ usernameSource = &repos.BitbucketServerSource{}
 
+// ValidateAuthenticator creates a ChangesetSource, configures it with the given
+// authenticator and validates it can correctly access the remote server.
 func (s *Service) ValidateAuthenticator(ctx context.Context, externalServiceID, externalServiceType string, a auth.Authenticator) error {
 	if Mocks.ValidateAuthenticator != nil {
 		return Mocks.ValidateAuthenticator(ctx, externalServiceID, externalServiceType, a)

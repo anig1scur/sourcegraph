@@ -29,6 +29,7 @@ type FakeChangesetSource struct {
 	CloseChangesetCalled        bool
 	ReopenChangesetCalled       bool
 	AuthenticatedUsernameCalled bool
+	ValidateAuthenticatorCalled bool
 
 	// The Changeset.HeadRef to be expected in CreateChangeset/UpdateChangeset calls.
 	WantHeadRef string
@@ -42,6 +43,9 @@ type FakeChangesetSource struct {
 	// Whether or not the changeset already ChangesetExists on the code host at the time
 	// when CreateChangeset is called.
 	ChangesetExists bool
+
+	// When true, ValidateAuthenticator will return no error.
+	AuthenticatorIsValid bool
 
 	// error to be returned from every method
 	Err error
@@ -234,7 +238,11 @@ func (s *FakeChangesetSource) WithAuthenticator(a auth.Authenticator) (repos.Sou
 }
 
 func (s *FakeChangesetSource) ValidateAuthenticator(context.Context) error {
-	return nil
+	s.ValidateAuthenticatorCalled = true
+	if s.AuthenticatorIsValid {
+		return nil
+	}
+	return errors.New("invalid authenticator in fake source")
 }
 
 func (s *FakeChangesetSource) AuthenticatedUsername(ctx context.Context) (string, error) {
