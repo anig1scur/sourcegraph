@@ -630,6 +630,172 @@ func TestExecutor_ExecutePlan_PublishedChangesetDuplicateBranch(t *testing.T) {
 	}
 }
 
+func TestLoadChangesetSource(t *testing.T) {
+	ctx := backend.WithAuthzBypass(context.Background())
+	db := dbtesting.GetDB(t)
+	token := &auth.OAuthBearerToken{Token: "abcdef"}
+
+	cstore := store.New(db)
+
+	admin := ct.CreateTestUser(t, db, true)
+	user := ct.CreateTestUser(t, db, false)
+
+	rs, _ := ct.CreateTestRepos(t, ctx, db, 1)
+	repo := rs[0]
+
+	batchSpec := ct.CreateBatchSpec(t, ctx, cstore, "reconciler-test-batch-change", admin.ID)
+	adminBatchChange := ct.CreateBatchChange(t, ctx, cstore, "reconciler-test-batch-change", admin.ID, batchSpec.ID)
+	userBatchChange := ct.CreateBatchChange(t, ctx, cstore, "reconciler-test-batch-change", user.ID, batchSpec.ID)
+
+	t.Run("imported changeset uses global token when no site-credential exists", func(t *testing.T) {
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: 0,
+		}, repo)
+		if err != nil {
+			t.Errorf("unexpected non-nil error: %v", err)
+		}
+		if fakeSource.CurrentAuthenticator != nil {
+			t.Errorf("unexpected non-nil authenticator: %v", fakeSource.CurrentAuthenticator)
+		}
+	})
+
+	t.Run("imported changeset uses site-credential when exists", func(t *testing.T) {
+		if err := cstore.CreateSiteCredential(ctx, &store.SiteCredential{
+			ExternalServiceType: repo.ExternalRepo.ServiceType,
+			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+			Credential:          token,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			ct.TruncateTables(t, db, "batch_changes_site_credentials")
+		})
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: 0,
+		}, repo)
+		if err != nil {
+			t.Errorf("unexpected non-nil error: %v", err)
+		}
+		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
+			t.Errorf("unexpected authenticator:\n%s", diff)
+		}
+	})
+
+	t.Run("owned by missing batch change", func(t *testing.T) {
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: 1234,
+		}, repo)
+		if err == nil {
+			t.Error("unexpected nil error")
+		}
+	})
+
+	t.Run("owned by admin user without credential", func(t *testing.T) {
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: adminBatchChange.ID,
+		}, repo)
+		if err != nil {
+			t.Errorf("unexpected non-nil error: %v", err)
+		}
+		if fakeSource.CurrentAuthenticator != nil {
+			t.Errorf("unexpected non-nil authenticator: %v", fakeSource.CurrentAuthenticator)
+		}
+	})
+
+	t.Run("owned by normal user without credential", func(t *testing.T) {
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: userBatchChange.ID,
+		}, repo)
+		if err == nil {
+			t.Error("unexpected nil error")
+		}
+	})
+
+	t.Run("owned by admin user with credential", func(t *testing.T) {
+		if _, err := cstore.UserCredentials().Create(ctx, database.UserCredentialScope{
+			Domain:              database.UserCredentialDomainBatches,
+			UserID:              admin.ID,
+			ExternalServiceType: repo.ExternalRepo.ServiceType,
+			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+		}, token); err != nil {
+			t.Fatal(err)
+		}
+
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: adminBatchChange.ID,
+		}, repo)
+		if err != nil {
+			t.Errorf("unexpected non-nil error: %v", err)
+		}
+		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
+			t.Errorf("unexpected authenticator:\n%s", diff)
+		}
+	})
+
+	t.Run("owned by normal user with credential", func(t *testing.T) {
+		if _, err := cstore.UserCredentials().Create(ctx, database.UserCredentialScope{
+			Domain:              database.UserCredentialDomainBatches,
+			UserID:              user.ID,
+			ExternalServiceType: repo.ExternalRepo.ServiceType,
+			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+		}, token); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			ct.TruncateTables(t, db, "user_credentials")
+		})
+
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: userBatchChange.ID,
+		}, repo)
+		if err != nil {
+			t.Errorf("unexpected non-nil error: %v", err)
+		}
+		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
+			t.Errorf("unexpected authenticator:\n%s", diff)
+		}
+	})
+
+	t.Run("owned by user without credential falls back to site-credential", func(t *testing.T) {
+		if err := cstore.CreateSiteCredential(ctx, &store.SiteCredential{
+			ExternalServiceType: repo.ExternalRepo.ServiceType,
+			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+			Credential:          token,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			ct.TruncateTables(t, db, "batch_changes_site_credentials")
+		})
+
+		fakeSource := &ct.FakeChangesetSource{}
+		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
+		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
+			OwnedByBatchChangeID: userBatchChange.ID,
+		}, repo)
+		if err != nil {
+			t.Errorf("unexpected non-nil error: %v", err)
+		}
+		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
+			t.Errorf("unexpected authenticator:\n%s", diff)
+		}
+	})
+}
+
 func TestExecutor_UserCredentialsForGitserver(t *testing.T) {
 	ctx := backend.WithAuthzBypass(context.Background())
 	db := dbtesting.GetDB(t)
@@ -932,170 +1098,4 @@ type mockInternalClient struct {
 
 func (c *mockInternalClient) ExternalURL(ctx context.Context) (string, error) {
 	return c.externalURL, c.err
-}
-
-func TestLoadChangesetSource(t *testing.T) {
-	ctx := backend.WithAuthzBypass(context.Background())
-	db := dbtesting.GetDB(t)
-	token := &auth.OAuthBearerToken{Token: "abcdef"}
-
-	cstore := store.New(db)
-
-	admin := ct.CreateTestUser(t, db, true)
-	user := ct.CreateTestUser(t, db, false)
-
-	rs, _ := ct.CreateTestRepos(t, ctx, db, 1)
-	repo := rs[0]
-
-	batchSpec := ct.CreateBatchSpec(t, ctx, cstore, "reconciler-test-batch-change", admin.ID)
-	adminBatchChange := ct.CreateBatchChange(t, ctx, cstore, "reconciler-test-batch-change", admin.ID, batchSpec.ID)
-	userBatchChange := ct.CreateBatchChange(t, ctx, cstore, "reconciler-test-batch-change", user.ID, batchSpec.ID)
-
-	t.Run("imported changeset uses global token when no site-credential exists", func(t *testing.T) {
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: 0,
-		}, repo)
-		if err != nil {
-			t.Errorf("unexpected non-nil error: %v", err)
-		}
-		if fakeSource.CurrentAuthenticator != nil {
-			t.Errorf("unexpected non-nil authenticator: %v", fakeSource.CurrentAuthenticator)
-		}
-	})
-
-	t.Run("imported changeset uses site-credential when exists", func(t *testing.T) {
-		if err := cstore.CreateSiteCredential(ctx, &store.SiteCredential{
-			ExternalServiceType: repo.ExternalRepo.ServiceType,
-			ExternalServiceID:   repo.ExternalRepo.ServiceID,
-			Credential:          token,
-		}); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			ct.TruncateTables(t, db, "batch_changes_site_credentials")
-		})
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: 0,
-		}, repo)
-		if err != nil {
-			t.Errorf("unexpected non-nil error: %v", err)
-		}
-		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
-			t.Errorf("unexpected authenticator:\n%s", diff)
-		}
-	})
-
-	t.Run("owned by missing batch change", func(t *testing.T) {
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: 1234,
-		}, repo)
-		if err == nil {
-			t.Error("unexpected nil error")
-		}
-	})
-
-	t.Run("owned by admin user without credential", func(t *testing.T) {
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: adminBatchChange.ID,
-		}, repo)
-		if err != nil {
-			t.Errorf("unexpected non-nil error: %v", err)
-		}
-		if fakeSource.CurrentAuthenticator != nil {
-			t.Errorf("unexpected non-nil authenticator: %v", fakeSource.CurrentAuthenticator)
-		}
-	})
-
-	t.Run("owned by normal user without credential", func(t *testing.T) {
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: userBatchChange.ID,
-		}, repo)
-		if err == nil {
-			t.Error("unexpected nil error")
-		}
-	})
-
-	t.Run("owned by admin user with credential", func(t *testing.T) {
-		if _, err := cstore.UserCredentials().Create(ctx, database.UserCredentialScope{
-			Domain:              database.UserCredentialDomainBatches,
-			UserID:              admin.ID,
-			ExternalServiceType: repo.ExternalRepo.ServiceType,
-			ExternalServiceID:   repo.ExternalRepo.ServiceID,
-		}, token); err != nil {
-			t.Fatal(err)
-		}
-
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: adminBatchChange.ID,
-		}, repo)
-		if err != nil {
-			t.Errorf("unexpected non-nil error: %v", err)
-		}
-		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
-			t.Errorf("unexpected authenticator:\n%s", diff)
-		}
-	})
-
-	t.Run("owned by normal user with credential", func(t *testing.T) {
-		if _, err := cstore.UserCredentials().Create(ctx, database.UserCredentialScope{
-			Domain:              database.UserCredentialDomainBatches,
-			UserID:              user.ID,
-			ExternalServiceType: repo.ExternalRepo.ServiceType,
-			ExternalServiceID:   repo.ExternalRepo.ServiceID,
-		}, token); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			ct.TruncateTables(t, db, "user_credentials")
-		})
-
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: userBatchChange.ID,
-		}, repo)
-		if err != nil {
-			t.Errorf("unexpected non-nil error: %v", err)
-		}
-		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
-			t.Errorf("unexpected authenticator:\n%s", diff)
-		}
-	})
-
-	t.Run("owned by user without credential falls back to site-credential", func(t *testing.T) {
-		if err := cstore.CreateSiteCredential(ctx, &store.SiteCredential{
-			ExternalServiceType: repo.ExternalRepo.ServiceType,
-			ExternalServiceID:   repo.ExternalRepo.ServiceID,
-			Credential:          token,
-		}); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			ct.TruncateTables(t, db, "batch_changes_site_credentials")
-		})
-
-		fakeSource := &ct.FakeChangesetSource{}
-		sourcer := sources.NewSourcer(repos.NewFakeSourcer(nil, fakeSource), cstore)
-		_, err := loadChangesetSource(ctx, cstore, sourcer, &batches.Changeset{
-			OwnedByBatchChangeID: userBatchChange.ID,
-		}, repo)
-		if err != nil {
-			t.Errorf("unexpected non-nil error: %v", err)
-		}
-		if diff := cmp.Diff(token, fakeSource.CurrentAuthenticator); diff != "" {
-			t.Errorf("unexpected authenticator:\n%s", diff)
-		}
-	})
 }
