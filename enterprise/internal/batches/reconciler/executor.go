@@ -76,7 +76,17 @@ func (e *executor) Run(ctx context.Context, plan *Plan) (err error) {
 		}
 		e.ccs, err = e.ccs.WithAuthenticatorForUser(ctx, batchChange.LastApplierID, e.repo)
 		if err != nil {
-			return err
+			switch err {
+			case sources.ErrMissingCredentials:
+				return &errMissingCredentials{repo: string(e.repo.Name)}
+			case sources.ErrNoSSHCredential:
+				return &errNoSSHCredential{}
+			default:
+				if enpc, ok := err.(sources.ErrNoPushCredentials); ok {
+					return &errNoPushCredentials{credentialsType: enpc.CredentialsType}
+				}
+				return err
+			}
 		}
 	} else {
 		// This retains the external service token, when no site credential is found.
@@ -534,3 +544,34 @@ func namespaceURL(ns *database.Namespace) string {
 
 	return prefix + ns.Name
 }
+
+// errNoSSHCredential is returned, if the  clone URL of the repository uses the
+// ssh:// scheme, but the authenticator doesn't support SSH pushes.
+type errNoSSHCredential struct{}
+
+func (e errNoSSHCredential) Error() string {
+	return "The used credential doesn't support SSH pushes, but the repo requires pushing over SSH."
+}
+
+func (e errNoSSHCredential) NonRetryable() bool { return true }
+
+// errMissingCredentials is returned if the user that applied the last batch change
+// /changeset spec doesn't have a user credential for the given repository and is
+// not a site-admin (so no fallback to the global credentials is possible).
+type errMissingCredentials struct{ repo string }
+
+func (e errMissingCredentials) Error() string {
+	return fmt.Sprintf("user does not have a valid credential for repository %q", e.repo)
+}
+
+func (e errMissingCredentials) NonRetryable() bool { return true }
+
+// errNoPushCredentials is returned if the authenticator cannot be used by git to
+// authenticate a `git push`.
+type errNoPushCredentials struct{ credentialsType string }
+
+func (e errNoPushCredentials) Error() string {
+	return fmt.Sprintf("cannot use credentials of type %s to push commits", e.credentialsType)
+}
+
+func (e errNoPushCredentials) NonRetryable() bool { return true }

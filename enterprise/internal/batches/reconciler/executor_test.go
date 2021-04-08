@@ -932,3 +932,154 @@ type mockInternalClient struct {
 func (c *mockInternalClient) ExternalURL(ctx context.Context) (string, error) {
 	return c.externalURL, c.err
 }
+
+// func TestExecutor_Run_Authenticator(t *testing.T) {
+// 	ctx := backend.WithAuthzBypass(context.Background())
+// 	db := dbtesting.GetDB(t)
+// 	token := &auth.OAuthBearerToken{Token: "abcdef"}
+
+// 	cstore := store.New(db)
+
+// 	admin := ct.CreateTestUser(t, db, true)
+// 	user := ct.CreateTestUser(t, db, false)
+
+// 	rs, _ := ct.CreateTestRepos(t, ctx, db, 1)
+// 	repo := rs[0]
+
+// 	batchSpec := ct.CreateBatchSpec(t, ctx, cstore, "reconciler-test-batch-change", admin.ID)
+// 	adminBatchChange := ct.CreateBatchChange(t, ctx, cstore, "reconciler-test-batch-change", admin.ID, batchSpec.ID)
+// 	userBatchChange := ct.CreateBatchChange(t, ctx, cstore, "reconciler-test-batch-change", user.ID, batchSpec.ID)
+
+// 	t.Run("imported changeset uses global token when no site-credential exists", func(t *testing.T) {
+// 		a, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: 0,
+// 		}, repo)
+// 		if err != nil {
+// 			t.Errorf("unexpected non-nil error: %v", err)
+// 		}
+// 		if a != nil {
+// 			t.Errorf("unexpected non-nil authenticator: %v", a)
+// 		}
+// 	})
+
+// 	t.Run("imported changeset uses site-credential when exists", func(t *testing.T) {
+// 		if err := cstore.CreateSiteCredential(ctx, &store.SiteCredential{
+// 			ExternalServiceType: repo.ExternalRepo.ServiceType,
+// 			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+// 			Credential:          token,
+// 		}); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		t.Cleanup(func() {
+// 			ct.TruncateTables(t, db, "batch_changes_site_credentials")
+// 		})
+
+// 		a, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: 0,
+// 		}, repo)
+// 		if err != nil {
+// 			t.Errorf("unexpected non-nil error: %v", err)
+// 		}
+// 		if diff := cmp.Diff(token, a); diff != "" {
+// 			t.Errorf("unexpected authenticator:\n%s", diff)
+// 		}
+// 	})
+
+// 	t.Run("owned by missing batch change", func(t *testing.T) {
+// 		_, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: 1234,
+// 		}, repo)
+// 		if err == nil {
+// 			t.Error("unexpected nil error")
+// 		}
+// 	})
+
+// 	t.Run("owned by admin user without credential", func(t *testing.T) {
+// 		a, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: adminBatchChange.ID,
+// 		}, repo)
+// 		if err != nil {
+// 			t.Errorf("unexpected non-nil error: %v", err)
+// 		}
+// 		if a != nil {
+// 			t.Errorf("unexpected non-nil authenticator: %v", a)
+// 		}
+// 	})
+
+// 	t.Run("owned by normal user without credential", func(t *testing.T) {
+// 		_, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: userBatchChange.ID,
+// 		}, repo)
+// 		if err == nil {
+// 			t.Error("unexpected nil error")
+// 		}
+// 	})
+
+// 	t.Run("owned by admin user with credential", func(t *testing.T) {
+// 		if _, err := cstore.UserCredentials().Create(ctx, database.UserCredentialScope{
+// 			Domain:              database.UserCredentialDomainBatches,
+// 			UserID:              admin.ID,
+// 			ExternalServiceType: repo.ExternalRepo.ServiceType,
+// 			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+// 		}, token); err != nil {
+// 			t.Fatal(err)
+// 		}
+
+// 		a, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: adminBatchChange.ID,
+// 		}, repo)
+// 		if err != nil {
+// 			t.Errorf("unexpected non-nil error: %v", err)
+// 		}
+// 		if diff := cmp.Diff(token, a); diff != "" {
+// 			t.Errorf("unexpected authenticator:\n%s", diff)
+// 		}
+// 	})
+
+// 	t.Run("owned by normal user with credential", func(t *testing.T) {
+// 		if _, err := cstore.UserCredentials().Create(ctx, database.UserCredentialScope{
+// 			Domain:              database.UserCredentialDomainBatches,
+// 			UserID:              user.ID,
+// 			ExternalServiceType: repo.ExternalRepo.ServiceType,
+// 			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+// 		}, token); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		t.Cleanup(func() {
+// 			ct.TruncateTables(t, db, "user_credentials")
+// 		})
+
+// 		a, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: userBatchChange.ID,
+// 		}, repo)
+// 		if err != nil {
+// 			t.Errorf("unexpected non-nil error: %v", err)
+// 		}
+// 		if diff := cmp.Diff(token, a); diff != "" {
+// 			t.Errorf("unexpected authenticator:\n%s", diff)
+// 		}
+// 	})
+
+// 	t.Run("owned by user without credential falls back to site-credential", func(t *testing.T) {
+// 		if err := cstore.CreateSiteCredential(ctx, &store.SiteCredential{
+// 			ExternalServiceType: repo.ExternalRepo.ServiceType,
+// 			ExternalServiceID:   repo.ExternalRepo.ServiceID,
+// 			Credential:          token,
+// 		}); err != nil {
+// 			t.Fatal(err)
+// 		}
+// 		t.Cleanup(func() {
+// 			ct.TruncateTables(t, db, "batch_changes_site_credentials")
+// 		})
+
+// 		a, err := loadAuthenticator(ctx, cstore, &batches.Changeset{
+// 			OwnedByBatchChangeID: userBatchChange.ID,
+// 		}, repo)
+// 		if err != nil {
+// 			t.Errorf("unexpected non-nil error: %v", err)
+// 		}
+// 		if diff := cmp.Diff(token, a); diff != "" {
+// 			t.Errorf("unexpected authenticator:\n%s", diff)
+// 		}
+// 	})
+// }

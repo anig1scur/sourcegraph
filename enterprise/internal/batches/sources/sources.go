@@ -27,34 +27,20 @@ import (
 // if the user that applied the last batch change/changeset spec doesn't have
 // UserCredentials for the given repository and is not a site-admin (so no
 // fallback to the global credentials is possible).
-type ErrMissingCredentials struct{ repo string }
-
-func (e ErrMissingCredentials) Error() string {
-	return fmt.Sprintf("user does not have a valid credential for repository %q", e.repo)
-}
-
-func (e ErrMissingCredentials) NonRetryable() bool { return true }
+var ErrMissingCredentials = errors.New("no credential found to authenticate BatchesSource")
 
 // ErrNoPushCredentials is returned by BatchesSource.GitserverPushConfig if the
 // authenticator cannot be used by git to authenticate a `git push`.
-type ErrNoPushCredentials struct{ credentialsType string }
+type ErrNoPushCredentials struct{ CredentialsType string }
 
 func (e ErrNoPushCredentials) Error() string {
-	return fmt.Sprintf("cannot use credentials of type %s to push commits", e.credentialsType)
+	return "invalid authenticator provided to push commits"
 }
-
-func (e ErrNoPushCredentials) NonRetryable() bool { return true }
 
 // ErrNoSSHCredential is returned by BatchesSource.GitserverPushConfig, if the
 // clone URL of the repository uses the ssh:// scheme, but the authenticator
 // doesn't support SSH pushes.
-type ErrNoSSHCredential struct{}
-
-func (e ErrNoSSHCredential) Error() string {
-	return "The used credential doesn't support SSH pushes, but the repo requires pushing over SSH."
-}
-
-func (e ErrNoSSHCredential) NonRetryable() bool { return true }
+var ErrNoSSHCredential = errors.New("authenticator doesn't support SSH")
 
 type SourcerStore interface {
 	DB() dbutil.DB
@@ -172,7 +158,7 @@ func (s *BatchesSource) GitserverPushConfig(repo *types.Repo) (*protocol.PushCon
 	if u.Scheme == "ssh" {
 		sshA, ok := s.au.(auth.AuthenticatorWithSSH)
 		if !ok {
-			return nil, ErrNoSSHCredential{}
+			return nil, ErrNoSSHCredential
 		}
 		privateKey, passphrase := sshA.SSHPrivateKey()
 		return &protocol.PushConfig{
@@ -201,7 +187,7 @@ func (s *BatchesSource) GitserverPushConfig(repo *types.Repo) (*protocol.PushCon
 			return nil, err
 		}
 	default:
-		return nil, ErrNoPushCredentials{credentialsType: fmt.Sprintf("%T", s.au)}
+		return nil, ErrNoPushCredentials{CredentialsType: fmt.Sprintf("%T", s.au)}
 	}
 
 	return &protocol.PushConfig{RemoteURL: u.String()}, nil
@@ -259,7 +245,7 @@ func (s *BatchesSource) WithAuthenticatorForUser(ctx context.Context, userID int
 	}
 
 	// Otherwise, we can't authenticate the given ChangesetSource, so we need to bail out.
-	return nil, &ErrMissingCredentials{repo: string(repo.Name)}
+	return nil, ErrMissingCredentials
 }
 
 // WithSiteAuthenticator uses the site credential of the code host of the passed-in repo.
