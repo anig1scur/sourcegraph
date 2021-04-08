@@ -543,6 +543,10 @@ type usernameSource interface {
 var _ usernameSource = &repos.BitbucketServerSource{}
 
 func (s *Service) ValidateAuthenticator(ctx context.Context, externalServiceID, externalServiceType string, a auth.Authenticator) error {
+	if Mocks.ValidateAuthenticator != nil {
+		return Mocks.ValidateAuthenticator(ctx, externalServiceID, externalServiceType, a)
+	}
+
 	srcer := sources.NewSourcer(s.sourcer, s.store)
 	css, err := srcer.ForExternalService(ctx, store.GetExternalServiceIDOpts{
 		ExternalServiceType: externalServiceType,
@@ -632,3 +636,13 @@ func (s *Service) DetachChangesets(ctx context.Context, batchChangeID int64, ids
 
 	return nil
 }
+
+type ServiceMocks struct {
+	ValidateAuthenticator func(ctx context.Context, externalServiceID, externalServiceType string, a auth.Authenticator) error
+}
+
+func (sm ServiceMocks) Reset() {
+	sm.ValidateAuthenticator = nil
+}
+
+var Mocks ServiceMocks = ServiceMocks{}
