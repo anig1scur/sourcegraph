@@ -17,7 +17,7 @@ import (
 type FakeChangesetSource struct {
 	Svc *types.ExternalService
 
-	authenticator auth.Authenticator
+	CurrentAuthenticator auth.Authenticator
 
 	CreateDraftChangesetCalled  bool
 	UndraftedChangesetsCalled   bool
@@ -229,7 +229,7 @@ func (s *FakeChangesetSource) ReopenChangeset(ctx context.Context, c *repos.Chan
 }
 
 func (s *FakeChangesetSource) WithAuthenticator(a auth.Authenticator) (repos.Source, error) {
-	s.authenticator = a
+	s.CurrentAuthenticator = a
 	return s, nil
 }
 

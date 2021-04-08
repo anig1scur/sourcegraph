@@ -45,7 +45,7 @@ type executor struct {
 	spec              *batches.ChangesetSpec
 	delta             *ChangesetSpecDelta
 
-	ccs  *sources.BatchesSource
+	css  *sources.BatchesSource
 	repo *types.Repo
 }
 
@@ -60,45 +60,10 @@ func (e *executor) Run(ctx context.Context, plan *Plan) (err error) {
 		return errors.Wrap(err, "failed to load repository")
 	}
 
-	// This is a changeset source using the external service config for authentication,
-	// based on our heuristic in the sources package.
-	e.ccs, err = e.sourcer.ForRepo(ctx, e.repo)
+	// Load the changeset source.
+	e.css, err = loadChangesetSource(ctx, e.tx, e.sourcer, e.ch, e.repo)
 	if err != nil {
 		return err
-	}
-	if e.ch.OwnedByBatchChangeID != 0 {
-		// If the changeset is owned by a batch change, we want to reconcile using
-		// the user's credentials, which means we need to know which user last
-		// applied the owning batch change. Let's go find out.
-		batchChange, err := loadBatchChange(ctx, e.tx, e.ch.OwnedByBatchChangeID)
-		if err != nil {
-			return errors.Wrap(err, "failed to load owning batch change")
-		}
-		e.ccs, err = e.ccs.WithAuthenticatorForUser(ctx, batchChange.LastApplierID, e.repo)
-		if err != nil {
-			switch err {
-			case sources.ErrMissingCredentials:
-				return &errMissingCredentials{repo: string(e.repo.Name)}
-			case sources.ErrNoSSHCredential:
-				return &errNoSSHCredential{}
-			default:
-				if enpc, ok := err.(sources.ErrNoPushCredentials); ok {
-					return &errNoPushCredentials{credentialsType: enpc.CredentialsType}
-				}
-				return err
-			}
-		}
-	} else {
-		// This retains the external service token, when no site credential is found.
-		// Unowned changesets are imported, and therefore don't need to use a user
-		// credential, since reconciliation isn't a mutating process. We try to use
-		// a site-credential, but it's ok if it doesn't exist.
-		// TODO: This code-path will fail once the site credentials are the only
-		// fallback we want to use.
-		e.ccs, err = e.ccs.WithSiteAuthenticator(ctx, e.repo)
-		if err != nil {
-			return err
-		}
 	}
 
 	for _, op := range plan.Ops.ExecutionOrder() {
@@ -172,14 +137,14 @@ func (e *executor) pushChangesetPatch(ctx context.Context) (err error) {
 	}
 
 	if existingSameBranch != nil && existingSameBranch.ID != e.ch.ID {
-		return ErrPublishSameBranch{}
+		return errPublishSameBranch{}
 	}
 
 	// Create a commit and push it
 	// Figure out which authenticator we should use to modify the changeset.
 	// au is nil if we want to use the global credentials stored in the external
 	// service configuration.
-	pushConf, err := e.ccs.GitserverPushConfig(e.repo)
+	pushConf, err := e.css.GitserverPushConfig(e.repo)
 	if err != nil {
 		return err
 	}
@@ -210,7 +175,7 @@ func (e *executor) publishChangeset(ctx context.Context, asDraft bool) (err erro
 	var exists bool
 	if asDraft {
 		// If the changeset shall be published in draft mode, make sure the changeset source implements DraftChangesetSource.
-		draftCss, err := e.ccs.DraftChangesetSource()
+		draftCss, err := e.css.DraftChangesetSource()
 		if err != nil {
 			return err
 		}
@@ -223,7 +188,7 @@ func (e *executor) publishChangeset(ctx context.Context, asDraft bool) (err erro
 		// ephemeral error, there's a race condition here.
 		// It's possible that `CreateChangeset` doesn't return the newest head ref
 		// commit yet, because the API of the codehost doesn't return it yet.
-		exists, err = e.ccs.CreateChangeset(ctx, cs)
+		exists, err = e.css.CreateChangeset(ctx, cs)
 		if err != nil {
 			return errors.Wrap(err, "creating changeset")
 		}
@@ -237,7 +202,7 @@ func (e *executor) publishChangeset(ctx context.Context, asDraft bool) (err erro
 		}
 
 		if outdated {
-			if err := e.ccs.UpdateChangeset(ctx, cs); err != nil {
+			if err := e.css.UpdateChangeset(ctx, cs); err != nil {
 				return errors.Wrap(err, "updating changeset")
 			}
 		}
@@ -277,7 +242,7 @@ func (e *executor) importChangeset(ctx context.Context) error {
 
 func (e *executor) loadChangeset(ctx context.Context) error {
 	repoChangeset := &repos.Changeset{Repo: e.repo, Changeset: e.ch}
-	return e.ccs.LoadChangeset(ctx, repoChangeset)
+	return e.css.LoadChangeset(ctx, repoChangeset)
 }
 
 // updateChangeset updates the given changeset's attribute on the code host
@@ -298,7 +263,7 @@ func (e *executor) updateChangeset(ctx context.Context) (err error) {
 		return errors.Wrapf(err, "decorating body for changeset %d", e.ch.ID)
 	}
 
-	if err := e.ccs.UpdateChangeset(ctx, &cs); err != nil {
+	if err := e.css.UpdateChangeset(ctx, &cs); err != nil {
 		return errors.Wrap(err, "updating changeset")
 	}
 
@@ -308,7 +273,7 @@ func (e *executor) updateChangeset(ctx context.Context) (err error) {
 // reopenChangeset reopens the given changeset attribute on the code host.
 func (e *executor) reopenChangeset(ctx context.Context) (err error) {
 	cs := repos.Changeset{Repo: e.repo, Changeset: e.ch}
-	if err := e.ccs.ReopenChangeset(ctx, &cs); err != nil {
+	if err := e.css.ReopenChangeset(ctx, &cs); err != nil {
 		return errors.Wrap(err, "updating changeset")
 	}
 	return nil
@@ -342,7 +307,7 @@ func (e *executor) closeChangeset(ctx context.Context) (err error) {
 
 	cs := &repos.Changeset{Changeset: e.ch, Repo: e.repo}
 
-	if err := e.ccs.CloseChangeset(ctx, cs); err != nil {
+	if err := e.css.CloseChangeset(ctx, cs); err != nil {
 		return errors.Wrap(err, "closing changeset")
 	}
 	return nil
@@ -350,7 +315,7 @@ func (e *executor) closeChangeset(ctx context.Context) (err error) {
 
 // undraftChangeset marks the given changeset on its code host as ready for review.
 func (e *executor) undraftChangeset(ctx context.Context) (err error) {
-	draftCss, err := e.ccs.DraftChangesetSource()
+	draftCss, err := e.css.DraftChangesetSource()
 	if err != nil {
 		return err
 	}
@@ -377,6 +342,50 @@ func (e *executor) sleep() {
 	}
 }
 
+func loadChangesetSource(ctx context.Context, s *store.Store, sourcer *sources.Sourcer, ch *batches.Changeset, repo *types.Repo) (*sources.BatchesSource, error) {
+	// This is a changeset source using the external service config for authentication,
+	// based on our heuristic in the sources package.
+	css, err := sourcer.ForRepo(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	if ch.OwnedByBatchChangeID != 0 {
+		// If the changeset is owned by a batch change, we want to reconcile using
+		// the user's credentials, which means we need to know which user last
+		// applied the owning batch change. Let's go find out.
+		batchChange, err := loadBatchChange(ctx, s, ch.OwnedByBatchChangeID)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to load owning batch change")
+		}
+		css, err = css.WithAuthenticatorForUser(ctx, batchChange.LastApplierID, repo)
+		if err != nil {
+			switch err {
+			case sources.ErrMissingCredentials:
+				return nil, &errMissingCredentials{repo: string(repo.Name)}
+			case sources.ErrNoSSHCredential:
+				return nil, &errNoSSHCredential{}
+			default:
+				if enpc, ok := err.(sources.ErrNoPushCredentials); ok {
+					return nil, &errNoPushCredentials{credentialsType: enpc.CredentialsType}
+				}
+				return nil, err
+			}
+		}
+	} else {
+		// This retains the external service token, when no site credential is found.
+		// Unowned changesets are imported, and therefore don't need to use a user
+		// credential, since reconciliation isn't a mutating process. We try to use
+		// a site-credential, but it's ok if it doesn't exist.
+		// TODO: This code-path will fail once the site credentials are the only
+		// fallback we want to use.
+		css, err = css.WithSiteAuthenticator(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return css, nil
+}
+
 func (e *executor) pushCommit(ctx context.Context, opts protocol.CreateCommitFromPatchRequest) error {
 	_, err := e.gitserverClient.CreateCommitFromPatch(ctx, opts)
 	if err != nil {
@@ -394,19 +403,6 @@ func (e *executor) pushCommit(ctx context.Context, opts protocol.CreateCommitFro
 
 	return nil
 }
-
-// ErrPublishSameBranch is returned by publish changeset if a changeset with
-// the same external branch already exists in the database and is owned by
-// another batch change.
-// It is a terminal error that won't be fixed by retrying to publish the
-// changeset with the same spec.
-type ErrPublishSameBranch struct{}
-
-func (e ErrPublishSameBranch) Error() string {
-	return "cannot create changeset on the same branch in multiple batch changes"
-}
-
-func (e ErrPublishSameBranch) NonRetryable() bool { return true }
 
 func buildCommitOpts(repo *types.Repo, spec *batches.ChangesetSpec, pushOpts *protocol.PushConfig) (opts protocol.CreateCommitFromPatchRequest, err error) {
 	desc := spec.Spec
@@ -544,6 +540,19 @@ func namespaceURL(ns *database.Namespace) string {
 
 	return prefix + ns.Name
 }
+
+// errPublishSameBranch is returned by publish changeset if a changeset with
+// the same external branch already exists in the database and is owned by
+// another batch change.
+// It is a terminal error that won't be fixed by retrying to publish the
+// changeset with the same spec.
+type errPublishSameBranch struct{}
+
+func (e errPublishSameBranch) Error() string {
+	return "cannot create changeset on the same branch in multiple batch changes"
+}
+
+func (e errPublishSameBranch) NonRetryable() bool { return true }
 
 // errNoSSHCredential is returned, if the  clone URL of the repository uses the
 // ssh:// scheme, but the authenticator doesn't support SSH pushes.
